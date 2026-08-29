@@ -1,0 +1,16 @@
+{
+  "name": "Sideline — game day tracker",
+  "short_name": "Sideline",
+  "description": "Track little league football plays, subs, and play counts from the sideline.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#DDE3D2",
+  "theme_color": "#DDE3D2",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
