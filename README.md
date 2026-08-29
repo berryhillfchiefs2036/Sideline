@@ -14,6 +14,11 @@ Static site. No build step required to deploy, no server required to run.
 
 That's it. Everything works immediately in single-coach mode — roster, lineups, plays, subs, stats, CSV export — all saved in the browser on that phone.
 
+### Or put it on Vercel
+
+Import the repo at [vercel.com/new](https://vercel.com/new) and deploy — the included `vercel.json` skips the
+build step and serves the repo as-is, so no settings are needed. Framework preset **Other** if it asks.
+
 ### Install it as an app
 
 Open the page on your phone and use **Add to Home Screen** (Safari share menu, or Chrome's ⋮ menu). It gets an icon, opens without browser chrome, and works with no signal — the service worker caches the whole app on first visit. Handy at fields with bad reception.
@@ -49,8 +54,19 @@ alter table public.sideline_squads enable row level security;
 -- Anyone who knows a game code can read and write that game.
 -- The four-letter code is the only thing protecting it, so keep games
 -- to jersey numbers and first names.
+create table public.sideline_games (
+  id         text primary key,
+  game_code  text not null,
+  game       jsonb not null,
+  ended_at   timestamptz not null default now()
+);
+create index sideline_games_code on public.sideline_games (game_code);
+
+alter table public.sideline_games enable row level security;
+
 create policy "open ops"    on public.sideline_ops    for all using (true) with check (true);
 create policy "open squads" on public.sideline_squads for all using (true) with check (true);
+create policy "open games"  on public.sideline_games  for all using (true) with check (true);
 
 -- Let the app receive live updates.
 alter publication supabase_realtime add table public.sideline_ops;
@@ -76,6 +92,22 @@ The policies above are deliberately wide open, which is fine for a rec league se
 
 ---
 
+## Season and career stats
+
+Tapping **Start a new game** on the Stats tab doesn't throw the game away — it archives the final score,
+opponent, and every player's stat line to the **Season** tab first, then clears the board. The Season tab
+shows the record, per-player totals (with games played), and the game list; if archives span multiple years,
+year chips appear so you can view one season or a whole career.
+
+This works with no database at all — archives live in the browser alongside everything else. Two things to know:
+
+- **Back it up.** Browser storage dies with the phone (or a cleared browser). The Season tab's **Back up**
+  button downloads every game as one JSON file; **Restore** merges a backup in without overwriting, which
+  also moves a season to a new phone or combines years.
+- **With a crew + Supabase**, archives are shared: whoever ends the game writes it to the `sideline_games`
+  table, every coach on the code sees the same season, and the history survives phone changes. A game
+  archived while offline uploads on reconnect.
+
 ## Housekeeping
 
 A `cron` job or a scheduled function to clear old games keeps the tables small:
@@ -84,6 +116,9 @@ A `cron` job or a scheduled function to clear old games keeps the tables small:
 delete from public.sideline_ops    where updated_at < now() - interval '90 days';
 delete from public.sideline_squads where updated_at < now() - interval '90 days';
 ```
+
+Leave `sideline_games` out of the purge — that table *is* the season history, and it stays tiny
+(a whole season is well under a megabyte).
 
 ---
 

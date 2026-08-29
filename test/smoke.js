@@ -19,6 +19,8 @@ Object.defineProperty(w, "localStorage", {
   },
 });
 w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {} });
+w.confirm = () => true;
+w.prompt = () => "Eagles";
 
 const load = (f) => w.eval(fs.readFileSync(path.join(root, f), "utf8"));
 load("config.js");
@@ -170,6 +172,27 @@ const type = (el, val) => {
   click(byText(".confirm", "Log the play"));
   await flush();
   ok("touchdown put 6 on the board", $$(".score-num")[0].textContent === "6");
+
+  console.log("\nseason archive");
+  click(byText(".nav button", "Stats"));
+  await flush();
+  click(byText(".abtn", "Start a new game"));
+  await flush();
+  click(byText(".nav button", "Game"));
+  await flush();
+  ok("board reset for the next game", $(".dd-sub").textContent.indexOf("0 plays") >= 0);
+  ok("score cleared", $(".score-num").textContent === "0");
+  click(byText(".nav button", "Season"));
+  await flush();
+  const gameRow = byText(".row", "vs Eagles");
+  ok("archived game listed with the opponent", !!gameRow);
+  ok("game recorded as a win", gameRow && gameRow.textContent.indexOf("W") >= 0);
+  ok("record shows 1-0", $(".sechd .eyebrow").textContent.indexOf("1-0") >= 0);
+  const samRow = $$("tbody tr").find((r) => r.textContent.indexOf("Sam") >= 0);
+  ok("season totals carry Sam's 2 snaps", samRow && samRow.querySelectorAll("td")[5].textContent === "2");
+  const jordanRow = $$("tbody tr").find((r) => r.textContent.indexOf("Jordan") >= 0);
+  ok("season totals carry Jordan's snap", jordanRow && jordanRow.querySelectorAll("td")[5].textContent === "1");
+  ok("games saved to localStorage", JSON.parse(store["sideline.solo.games"] || "[]").length === 1);
 
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
