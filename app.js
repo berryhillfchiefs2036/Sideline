@@ -299,6 +299,39 @@ function tally(plays) {
   return m;
 }
 
+/* Season totals: sum archived per-game stat lines, keyed by player. */
+function seasonTotals(games) {
+  const m = {};
+  const keys = Object.keys(blank());
+  games.forEach(g => {
+    (g.players || []).forEach(r => {
+      if (!r || !r.id) return;
+      const t = m[r.id] || (m[r.id] = Object.assign(blank(), {
+        id: r.id,
+        num: r.num,
+        name: r.name,
+        gp: 0
+      }));
+      t.num = r.num;
+      t.name = r.name;
+      t.gp += 1;
+      keys.forEach(k => {
+        t[k] += r.s && r.s[k] || 0;
+      });
+    });
+  });
+  return Object.keys(m).map(k => m[k]);
+}
+const download = (name, text, mime) => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], {
+    type: mime
+  }));
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
 /* ============================ STORAGE ============================ */
 
 const LS = {
@@ -319,13 +352,16 @@ const LS = {
 const K_ME = "sideline.me";
 const K_SOLO_OPS = "sideline.solo.ops";
 const K_SOLO_SQUAD = "sideline.solo.squad";
+const K_SOLO_GAMES = "sideline.solo.games";
 const kCrewOps = c => `sideline.crew.${c}.ops`;
 const kCrewSquad = c => `sideline.crew.${c}.squad`;
+const kCrewGames = c => `sideline.crew.${c}.games`;
 const CFG = window.SIDELINE_CONFIG || {};
 const CREW_ON = !!(CFG.supabaseUrl && CFG.supabaseAnonKey && CFG.supabaseUrl.indexOf("YOUR-") < 0);
 const sb = CREW_ON ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
 const T_OPS = "sideline_ops";
 const T_SQUAD = "sideline_squads";
+const T_GAMES = "sideline_games";
 const makeCode = () => {
   const A = "BCDFGHJKLMNPQRSTVWXYZ23456789";
   return Array.from({
@@ -353,6 +389,7 @@ function useSideline() {
   const [squad, setSquadLocal] = useState(() => saved && saved.code ? LS.get(kCrewSquad(saved.code), freshSquad()) : LS.get(K_SOLO_SQUAD, freshSquad()));
   const [mine, setMine] = useState(() => saved && saved.code ? LS.get(kCrewOps(saved.code), []) : LS.get(K_SOLO_OPS, []));
   const [theirs, setTheirs] = useState({});
+  const [games, setGamesLocal] = useState(() => saved && saved.code ? LS.get(kCrewGames(saved.code), []) : LS.get(K_SOLO_GAMES, []));
   const [sync, setSync] = useState({
     state: code ? "connecting" : "solo",
     coaches: 1,
@@ -431,6 +468,73 @@ function useSideline() {
     });
   }, [code]);
 
+  /* ---- season archive ---- */
+  const mutateGames = useCallback(fn => {
+    setGamesLocal(prev => {
+      const next = fn(prev);
+      LS.set(code ? kCrewGames(code) : K_SOLO_GAMES, next);
+      return next;
+    });
+  }, [code]);
+  const pushGame = useCallback(async rec => {
+    if (!code || !sb) return true;
+    const {
+      error
+    } = await sb.from(T_GAMES).upsert({
+      id: rec.id,
+      game_code: code,
+      game: Object.assign({}, rec, {
+        pending: false
+      }),
+      ended_at: rec.endedAt
+    }, {
+      onConflict: "id"
+    });
+    return !error;
+  }, [code]);
+  const archiveGame = useCallback(rec => {
+    mutateGames(prev => prev.concat([Object.assign({}, rec, {
+      pending: !!code
+    })]));
+    if (code && sb) pushGame(rec).then(sent => {
+      if (sent) mutateGames(prev => prev.map(g => g.id === rec.id ? Object.assign({}, g, {
+        pending: false
+      }) : g));
+    });
+  }, [code, mutateGames, pushGame]);
+  const renameGame = useCallback((id, opponent) => {
+    mutateGames(prev => prev.map(g => g.id === id ? Object.assign({}, g, {
+      opponent
+    }) : g));
+    const rec = games.find(g => g.id === id);
+    if (rec && code && sb) pushGame(Object.assign({}, rec, {
+      opponent
+    }));
+  }, [games, code, mutateGames, pushGame]);
+  const removeGame = useCallback(id => {
+    mutateGames(prev => prev.filter(g => g.id !== id));
+    if (code && sb) sb.from(T_GAMES).delete().eq("id", id).eq("game_code", code).then(() => {});
+  }, [code, mutateGames]);
+  const importGames = useCallback(list => {
+    const incoming = (Array.isArray(list) ? list : []).filter(g => g && g.id && g.endedAt && Array.isArray(g.players));
+    const have = {};
+    games.forEach(g => {
+      have[g.id] = true;
+    });
+    const fresh = incoming.filter(g => !have[g.id]);
+    if (fresh.length) {
+      mutateGames(prev => {
+        const ids = {};
+        prev.forEach(g => {
+          ids[g.id] = true;
+        });
+        return prev.concat(fresh.filter(g => !ids[g.id])).sort((a, b) => a.endedAt < b.endedAt ? -1 : a.endedAt > b.endedAt ? 1 : 0);
+      });
+      if (code && sb) fresh.forEach(g => pushGame(g));
+    }
+    return fresh.length;
+  }, [games, code, mutateGames, pushGame]);
+
   /* ---- reader ---- */
   const pull = useCallback(async () => {
     if (!code || !sb) return;
@@ -461,13 +565,30 @@ function useSideline() {
           return prev;
         });
       }
+      // Season archive: upload anything still local, then take the shared list.
+      const pend = LS.get(kCrewGames(code), []).filter(g => g.pending);
+      if (pend.length) await Promise.all(pend.map(g => pushGame(g)));
+      const gr = await sb.from(T_GAMES).select("game").eq("game_code", code);
+      if (!gr.error && gr.data) {
+        const remote = gr.data.map(r => r.game).filter(g => g && g.id).map(g => Object.assign({}, g, {
+          pending: false
+        }));
+        const ids = {};
+        remote.forEach(g => {
+          ids[g.id] = true;
+        });
+        const still = LS.get(kCrewGames(code), []).filter(g => g.pending && !ids[g.id]);
+        const next = remote.concat(still).sort((a, b) => a.endedAt < b.endedAt ? -1 : a.endedAt > b.endedAt ? 1 : 0);
+        LS.set(kCrewGames(code), next);
+        setGamesLocal(next);
+      }
       if (dirty.current) pushOps(mine, meRef.current);
     } catch (e) {
       setSync(s => Object.assign({}, s, {
         state: "offline"
       }));
     }
-  }, [code, mine, pushOps]);
+  }, [code, mine, pushOps, pushGame]);
 
   /* ---- realtime + safety poll ---- */
   useEffect(() => {
@@ -536,6 +657,7 @@ function useSideline() {
     setTheirs({});
     setMine(LS.get(kCrewOps(clean), []));
     setSquadLocal(LS.get(kCrewSquad(clean), freshSquad()));
+    setGamesLocal(LS.get(kCrewGames(clean), []));
     setSync({
       state: "connecting",
       coaches: 1,
@@ -563,6 +685,7 @@ function useSideline() {
     setTheirs({});
     setMine(LS.get(K_SOLO_OPS, []));
     setSquadLocal(LS.get(K_SOLO_SQUAD, freshSquad()));
+    setGamesLocal(LS.get(K_SOLO_GAMES, []));
   }, []);
   const allOps = useMemo(() => {
     const out = mine.map(o => Object.assign({}, o, {
@@ -586,7 +709,12 @@ function useSideline() {
     joinCrew,
     leaveCrew,
     renameMe,
-    crewAvailable: CREW_ON
+    crewAvailable: CREW_ON,
+    games,
+    archiveGame,
+    renameGame,
+    removeGame,
+    importGames
   };
 }
 
@@ -661,6 +789,23 @@ function Sideline() {
     });
     setSheet(null);
   };
+  const archive = opponent => {
+    const players = roster.map(p => ({
+      id: p.id,
+      num: p.num,
+      name: p.name,
+      s: statOf(p.id)
+    })).filter(r => r.s.snaps > 0);
+    S.archiveGame({
+      id: uid(),
+      endedAt: new Date().toISOString(),
+      opponent: opponent || "",
+      us: game.us,
+      them: game.them,
+      playsCount: game.plays.length,
+      players
+    });
+  };
   const lastUndoable = game.live.slice().reverse().find(o => ["play", "sub", "adj", "set"].indexOf(o.type) >= 0);
   const undo = () => {
     if (!lastUndoable) return;
@@ -720,7 +865,13 @@ function Sideline() {
     minPlays,
     game,
     addOp,
-    code
+    code,
+    onArchive: archive
+  }), tab === "season" && /*#__PURE__*/React.createElement(SeasonTab, {
+    games: S.games,
+    onRename: S.renameGame,
+    onRemove: S.removeGame,
+    onImport: S.importGames
   })), sheet && sheet.type === "play" && /*#__PURE__*/React.createElement(PlaySheet, {
     slot: sheet.slot,
     player: byId[sheet.slot.playerId],
@@ -750,7 +901,7 @@ function Sideline() {
     onClose: () => setSheet(null)
   }), /*#__PURE__*/React.createElement("nav", {
     className: "nav"
-  }, [["game", "Game"], ["roster", "Roster"], ["lineups", "Lineups"], ["stats", "Stats"]].map(t => /*#__PURE__*/React.createElement("button", {
+  }, [["game", "Game"], ["roster", "Roster"], ["lineups", "Lineups"], ["stats", "Stats"], ["season", "Season"]].map(t => /*#__PURE__*/React.createElement("button", {
     key: t[0],
     className: tab === t[0] ? "on" : "",
     onClick: () => setTab(t[0])
@@ -1648,7 +1799,8 @@ function StatsTab({
   minPlays,
   game,
   addOp,
-  code
+  code,
+  onArchive
 }) {
   const [view, setView] = useState("plays");
   const rows = roster.map(p => ({
@@ -1673,14 +1825,7 @@ function StatsTab({
       s
     }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY, s.passY, s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.td, s.pts]);
     const csv = [head].concat(body).map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], {
-      type: "text/csv"
-    });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "sideline-" + new Date().toISOString().slice(0, 10) + ".csv";
-    a.click();
-    URL.revokeObjectURL(a.href);
+    download("sideline-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv");
   };
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "sechd"
@@ -1774,12 +1919,205 @@ function StatsTab({
   }, "Download stats"), /*#__PURE__*/React.createElement("button", {
     className: "abtn ghost",
     onClick: () => {
-      const msg = code ? "Clear the score, play log, and every stat for all coaches? Roster and lineups stay put." : "Clear the score, play log, and every stat? Roster and lineups stay put.";
-      if (window.confirm(msg)) addOp({
+      const msg = code ? "End this game for all coaches? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put." : "End this game? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put.";
+      if (!window.confirm(msg)) return;
+      if (game.plays.length > 0) onArchive(window.prompt("Who was this game against? (optional)", "") || "");
+      addOp({
         type: "reset"
       });
     }
   }, "Start a new game")));
+}
+
+/* ============================ SEASON ============================ */
+
+function SeasonTab({
+  games,
+  onRename,
+  onRemove,
+  onImport
+}) {
+  const [year, setYear] = useState("all");
+  const [view, setView] = useState("plays");
+  const fileRef = useRef(null);
+  const years = useMemo(() => {
+    const ys = {};
+    games.forEach(g => {
+      ys[(g.endedAt || "").slice(0, 4)] = true;
+    });
+    return Object.keys(ys).sort().reverse();
+  }, [games]);
+  const shown = year === "all" ? games : games.filter(g => (g.endedAt || "").slice(0, 4) === year);
+  const totals = useMemo(() => seasonTotals(shown), [shown]);
+  const wins = shown.filter(g => g.us > g.them).length;
+  const losses = shown.filter(g => g.us < g.them).length;
+  const ties = shown.length - wins - losses;
+  const newest = shown.slice().sort((a, b) => a.endedAt < b.endedAt ? 1 : -1);
+  const exportCsv = () => {
+    const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
+    const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0)).map(t => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY, t.passY, t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.td, t.pts]);
+    const csv = [head].concat(body).map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    download("sideline-season-" + (year === "all" ? "all" : year) + ".csv", csv, "text/csv");
+  };
+  const backup = () => {
+    download("sideline-games-" + new Date().toISOString().slice(0, 10) + ".json", JSON.stringify(games, null, 2), "application/json");
+  };
+  const restore = e => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const n = onImport(JSON.parse(rd.result));
+        window.alert(n ? "Added " + n + (n === 1 ? " game." : " games.") : "Nothing new in that backup.");
+      } catch (err) {
+        window.alert("That file doesn't look like a Sideline backup.");
+      }
+    };
+    rd.readAsText(f);
+    e.target.value = "";
+  };
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "sechd"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h2"
+  }, "Season"), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, shown.length, " ", shown.length === 1 ? "game" : "games", " \xB7 ", wins, "-", losses, ties ? "-" + ties : "")), years.length > 1 && /*#__PURE__*/React.createElement("div", {
+    className: "stbar"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: year === "all" ? "on" : "",
+    onClick: () => setYear("all")
+  }, "All years"), years.map(y => /*#__PURE__*/React.createElement("button", {
+    key: y,
+    className: year === y ? "on" : "",
+    onClick: () => setYear(y)
+  }, y))), shown.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "empty-note"
+  }, "No games saved yet. Finish a game and tap ", /*#__PURE__*/React.createElement("b", null, "Start a new game"), " on the Stats tab \u2014 it lands here automatically, and the totals below grow all season.") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "stbar"
+  }, [["plays", "Play count"], ["off", "Offense"], ["def", "Defense"]].map(v => /*#__PURE__*/React.createElement("button", {
+    key: v[0],
+    className: view === v[0] ? "on" : "",
+    onClick: () => setView(v[0])
+  }, v[1]))), view === "plays" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "GP"), /*#__PURE__*/React.createElement("th", null, "Off"), /*#__PURE__*/React.createElement("th", null, "Def"), /*#__PURE__*/React.createElement("th", null, "Spec"), /*#__PURE__*/React.createElement("th", null, "Total"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.snaps - a.snaps).map(t => /*#__PURE__*/React.createElement("tr", {
+    key: t.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", t.num), " ", t.name), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.gp), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.off), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.def), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.st), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.snaps))))), view === "off" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Car"), /*#__PURE__*/React.createElement("th", null, "Rush"), /*#__PURE__*/React.createElement("th", null, "Rec"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Pass"), /*#__PURE__*/React.createElement("th", null, "TD"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.rushY + b.recY - (a.rushY + a.recY)).map(t => /*#__PURE__*/React.createElement("tr", {
+    key: t.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", t.num), " ", t.name), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.rush), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.rushY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.rec), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.recY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.passY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.td))))), view === "def" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Tkl"), /*#__PURE__*/React.createElement("th", null, "Ast"), /*#__PURE__*/React.createElement("th", null, "Sck"), /*#__PURE__*/React.createElement("th", null, "Int"), /*#__PURE__*/React.createElement("th", null, "FR"), /*#__PURE__*/React.createElement("th", null, "PBU"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.tk - a.tk).map(t => /*#__PURE__*/React.createElement("tr", {
+    key: t.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", t.num), " ", t.name), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.tk), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.ast), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.sack), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.int), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.fr), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.pbu))))), /*#__PURE__*/React.createElement("div", {
+    className: "sechd"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h2"
+  }, "Games"), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, "Latest first")), newest.map(g => /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    key: g.id
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "plate",
+    style: {
+      minWidth: 62,
+      fontSize: 16
+    }
+  }, g.us, "\u2013", g.them), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 600,
+      fontSize: 15
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: "var(--cond)",
+      color: g.us > g.them ? "var(--go)" : g.us < g.them ? "var(--stop)" : "var(--soft)"
+    }
+  }, g.us > g.them ? "W" : g.us < g.them ? "L" : "T"), " ", g.opponent ? "vs " + g.opponent : "Game"), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, new Date(g.endedAt).toLocaleDateString(), " \xB7 ", g.playsCount, " plays", g.pending ? " · waiting to upload" : "")), /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    onClick: () => {
+      const v = window.prompt("Opponent name", g.opponent || "");
+      if (v !== null) onRename(g.id, v);
+    }
+  }, "Name"), /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    onClick: () => {
+      if (window.confirm("Remove this game from the season? Its stats leave the totals.")) onRemove(g.id);
+    }
+  }, "Remove")))), /*#__PURE__*/React.createElement("div", {
+    className: "sechd"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h2"
+  }, "Keep it safe")), /*#__PURE__*/React.createElement("div", {
+    className: "actionbar",
+    style: {
+      marginTop: 0
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "abtn",
+    onClick: exportCsv,
+    disabled: !shown.length
+  }, "Season CSV"), /*#__PURE__*/React.createElement("button", {
+    className: "abtn",
+    onClick: backup,
+    disabled: !games.length
+  }, "Back up"), /*#__PURE__*/React.createElement("button", {
+    className: "abtn ghost",
+    onClick: () => fileRef.current && fileRef.current.click()
+  }, "Restore")), /*#__PURE__*/React.createElement("input", {
+    ref: fileRef,
+    type: "file",
+    accept: "application/json,.json",
+    style: {
+      display: "none"
+    },
+    onChange: restore
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "empty-note",
+    style: {
+      textAlign: "left",
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Back up"), " downloads every saved game as one file \u2014 do it now and then, or before switching phones.", /*#__PURE__*/React.createElement("b", null, " Restore"), " merges a backup in without overwriting anything, so it also works for combining years."));
 }
 
 /* ============================ MOUNT ============================ */
