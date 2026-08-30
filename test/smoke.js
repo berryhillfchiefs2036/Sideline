@@ -125,6 +125,10 @@ const type = (el, val) => {
   console.log("\ngame — logging a play");
   click(byText(".nav button", "Game"));
   await flush();
+  ok("board asks which game before logging", !!byText(".abtn", "Track without a scheduled game") &&
+    $$(".pcard").length === 0);
+  click(byText(".abtn", "Track without a scheduled game"));
+  await flush();
   const cards = $$(".pcard");
   ok("11 position cards on the field", cards.length === 11);
   ok("renamed position shows on the field",
@@ -318,6 +322,10 @@ const type = (el, val) => {
   await flush();
 
   console.log("\npassing stats");
+  ok("ended game locks the board until the next game is picked",
+    !!byText(".abtn", "Track without a scheduled game"));
+  click(byText(".abtn", "Track without a scheduled game"));
+  await flush();
   click($$(".pcard.empty")[0].querySelector(".pc-top"));
   await flush();
   click($$(".sheet .row").find((r) => r.textContent.indexOf("Eli") >= 0));
@@ -1082,7 +1090,12 @@ const type = (el, val) => {
   await flush();
   const scrimRow = byText(".row", "Practice Squad");
   ok("scrimmage flagged on the schedule", !!scrimRow && scrimRow.textContent.indexOf("scrimmage") >= 0);
-  click(Array.from(scrimRow.querySelectorAll(".mini")).find((b) => b.textContent === "Add stats"));
+  click(byText(".nav button", "Game"));
+  await flush();
+  const pickRow = byText(".row", "Practice Squad");
+  ok("locked board lists the next scheduled game", !!pickRow &&
+    !!Array.from(pickRow.querySelectorAll(".mini")).find((b) => b.textContent === "Start this game"));
+  click(Array.from(pickRow.querySelectorAll(".mini")).find((b) => b.textContent === "Start this game"));
   await flush();
   ok("board tagged as a scrimmage",
     $(".sl").textContent.indexOf("Tracking vs Practice Squad") >= 0 &&
@@ -1111,6 +1124,8 @@ const type = (el, val) => {
   ok("no live-game note on an empty board",
     !$$(".eyebrow").some((e) => e.textContent.indexOf("include the game on the board") >= 0));
   click(byText(".nav button", "Game"));
+  await flush();
+  click(byText(".abtn", "Track without a scheduled game"));
   await flush();
   click($$(".pcard.empty")[0].querySelector(".pc-top"));
   await flush();

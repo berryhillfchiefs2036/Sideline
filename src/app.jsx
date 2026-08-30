@@ -915,7 +915,7 @@ function Sideline() {
         {tab === "game" && <GameTab {...{ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay,
           undo, canUndo: !!lastUndoable, roster, moving, setMoving, assign, onEndGame: endGame,
           unit, stKey, setUnit, setStKey, movingPlay, setMovingPlay, placeAfter, placeFirst,
-          teamName, oppName }} />}
+          teamName, oppName, schedule: squad.schedule || [], onTrack: trackScheduled }} />}
         {tab === "roster" && <RosterTab squad={squad} setSquad={setSquad} statOf={statOf} />}
         {tab === "lineups" && <LineupsTab squad={squad} setSquad={setSquad} />}
         {tab === "stats" && <StatsTab {...{ roster, statOf, minPlays, game, teamName }} onEndGame={endGame} />}
@@ -992,9 +992,15 @@ function Sideline() {
 
 /* ============================ GAME TAB ============================ */
 
-function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay, undo, canUndo, roster, moving, setMoving, assign, onEndGame, unit, stKey, setUnit, setStKey, movingPlay, setMovingPlay, placeAfter, placeFirst, teamName, oppName }) {
+function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay, undo, canUndo, roster, moving, setMoving, assign, onEndGame, unit, stKey, setUnit, setStKey, movingPlay, setMovingPlay, placeAfter, placeFirst, teamName, oppName, schedule, onTrack }) {
   const set = (field, value) => addOp({ type: "set", field, value });
   const filled = onField.filter((s) => s.playerId).length;
+  /* After a game ends the board comes back blank and untagged — hold the
+     logging controls until the coaches pick which game this is, so no play
+     ever lands in the wrong game. */
+  const needsGame = !game.gameInfo && game.playCount === 0 && game.plays.length === 0;
+  const upcoming = (schedule || []).filter((g) => !g.done)
+    .sort((a, b) => ((a.date + "T" + (a.time || "")) < (b.date + "T" + (b.time || "")) ? -1 : 1));
   const movingSlot = moving ? onField.find((s) => s.id === moving) : null;
   const movingPlayer = movingSlot ? byId[movingSlot.playerId] : null;
 
@@ -1063,14 +1069,16 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
         </div>
       )}
 
+      {!needsGame && (
       <div className="units">
         {UNITS.map((u) => (
           <button key={u.key} className={"unit " + u.key + (unit === u.key ? " on" : "")}
             onClick={() => setUnit(u.key)}>{u.label}</button>
         ))}
       </div>
+      )}
 
-      {unit === "special" && (
+      {!needsGame && unit === "special" && (
         <div className="stbar">
           {ST_KEYS.map((k) => (
             <button key={k} className={stKey === k ? "on" : ""} onClick={() => setStKey(k)}>
@@ -1091,6 +1099,34 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
         <div className="empty-note" style={{ marginTop: 10 }}>
           No players yet. Open <b>Roster</b> to add your team, then set starters in <b>Lineups</b>.
         </div>
+      ) : needsGame ? (
+        <React.Fragment>
+          <div className="empty-note" style={{ textAlign: "left", marginTop: 10 }}>
+            <b>Which game is this?</b> The last game is saved on the Season tab. Pick the next one
+            so every play lands in the right game.
+          </div>
+          {upcoming.map((g, i) => (
+            <div className="row" key={g.id}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 15 }}>vs {g.opponent}</div>
+                <div className="eyebrow">
+                  {i === 0 ? "Next up · " : ""}
+                  {new Date(g.date + "T12:00:00")
+                    .toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                  {g.scrim ? " · scrimmage" : ""}
+                </div>
+              </div>
+              <button className="mini dark" onClick={() => onTrack(g)}>Start this game</button>
+            </div>
+          ))}
+          {upcoming.length === 0 && (
+            <div className="empty-note">
+              Nothing on the schedule yet — add the games on the <b>Season</b> tab.
+            </div>
+          )}
+          <button className="abtn ghost" style={{ width: "100%", marginTop: 10 }}
+            onClick={() => set("gameInfo", { adhoc: true })}>Track without a scheduled game</button>
+        </React.Fragment>
       ) : (
         <div className="grid" style={{ marginTop: 10 }}>
           {onField.map((s) => {
@@ -1125,12 +1161,14 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
         </div>
       )}
 
+      {!needsGame && (
       <div className="actionbar">
         <button className="abtn" disabled={filled === 0}
           onClick={() => logPlay({ playerId: null, action: "team", yards: 0, score: "none" })}>Snap, no stat</button>
         <button className="abtn" onClick={() => setSheet({ type: "pen" })}>Flag</button>
         <button className="abtn ghost" disabled={!canUndo} onClick={undo}>Undo</button>
       </div>
+      )}
 
       <PlayLog game={game} byId={byId} addOp={addOp} teamName={teamName} oppName={oppName}
         onEdit={(p) => setSheet({ type: "editplay", play: p })}

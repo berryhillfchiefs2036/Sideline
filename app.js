@@ -1553,7 +1553,9 @@ function Sideline() {
     placeAfter,
     placeFirst,
     teamName,
-    oppName
+    oppName,
+    schedule: squad.schedule || [],
+    onTrack: trackScheduled
   }), tab === "roster" && /*#__PURE__*/React.createElement(RosterTab, {
     squad: squad,
     setSquad: setSquad,
@@ -1766,7 +1768,9 @@ function GameTab({
   placeAfter,
   placeFirst,
   teamName,
-  oppName
+  oppName,
+  schedule,
+  onTrack
 }) {
   const set = (field, value) => addOp({
     type: "set",
@@ -1774,6 +1778,11 @@ function GameTab({
     value
   });
   const filled = onField.filter(s => s.playerId).length;
+  /* After a game ends the board comes back blank and untagged — hold the
+     logging controls until the coaches pick which game this is, so no play
+     ever lands in the wrong game. */
+  const needsGame = !game.gameInfo && game.playCount === 0 && game.plays.length === 0;
+  const upcoming = (schedule || []).filter(g => !g.done).sort((a, b) => a.date + "T" + (a.time || "") < b.date + "T" + (b.time || "") ? -1 : 1);
   const movingSlot = moving ? onField.find(s => s.id === moving) : null;
   const movingPlayer = movingSlot ? byId[movingSlot.playerId] : null;
   const tapCard = s => {
@@ -1893,13 +1902,13 @@ function GameTab({
     weekday: "short",
     month: "short",
     day: "numeric"
-  }) : "", game.gameInfo.scrim ? " · scrimmage" : ""), /*#__PURE__*/React.createElement("div", {
+  }) : "", game.gameInfo.scrim ? " · scrimmage" : ""), !needsGame && /*#__PURE__*/React.createElement("div", {
     className: "units"
   }, UNITS.map(u => /*#__PURE__*/React.createElement("button", {
     key: u.key,
     className: "unit " + u.key + (unit === u.key ? " on" : ""),
     onClick: () => setUnit(u.key)
-  }, u.label))), unit === "special" && /*#__PURE__*/React.createElement("div", {
+  }, u.label))), !needsGame && unit === "special" && /*#__PURE__*/React.createElement("div", {
     className: "stbar"
   }, ST_KEYS.map(k => /*#__PURE__*/React.createElement("button", {
     key: k,
@@ -1922,7 +1931,46 @@ function GameTab({
     style: {
       marginTop: 10
     }
-  }, "No players yet. Open ", /*#__PURE__*/React.createElement("b", null, "Roster"), " to add your team, then set starters in ", /*#__PURE__*/React.createElement("b", null, "Lineups"), ".") : /*#__PURE__*/React.createElement("div", {
+  }, "No players yet. Open ", /*#__PURE__*/React.createElement("b", null, "Roster"), " to add your team, then set starters in ", /*#__PURE__*/React.createElement("b", null, "Lineups"), ".") : needsGame ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "empty-note",
+    style: {
+      textAlign: "left",
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Which game is this?"), " The last game is saved on the Season tab. Pick the next one so every play lands in the right game."), upcoming.map((g, i) => /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    key: g.id
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 600,
+      fontSize: 15
+    }
+  }, "vs ", g.opponent), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, i === 0 ? "Next up · " : "", new Date(g.date + "T12:00:00").toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric"
+  }), g.scrim ? " · scrimmage" : "")), /*#__PURE__*/React.createElement("button", {
+    className: "mini dark",
+    onClick: () => onTrack(g)
+  }, "Start this game"))), upcoming.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "empty-note"
+  }, "Nothing on the schedule yet \u2014 add the games on the ", /*#__PURE__*/React.createElement("b", null, "Season"), " tab."), /*#__PURE__*/React.createElement("button", {
+    className: "abtn ghost",
+    style: {
+      width: "100%",
+      marginTop: 10
+    },
+    onClick: () => set("gameInfo", {
+      adhoc: true
+    })
+  }, "Track without a scheduled game")) : /*#__PURE__*/React.createElement("div", {
     className: "grid",
     style: {
       marginTop: 10
@@ -1973,7 +2021,7 @@ function GameTab({
         slot: s
       })
     }, backup && backup.id !== s.playerId ? "⇄ " + backup.num : "Sub"))));
-  })), /*#__PURE__*/React.createElement("div", {
+  })), !needsGame && /*#__PURE__*/React.createElement("div", {
     className: "actionbar"
   }, /*#__PURE__*/React.createElement("button", {
     className: "abtn",
