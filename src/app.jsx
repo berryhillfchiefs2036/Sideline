@@ -1142,9 +1142,11 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
   const [qtr, setQtr] = useState(play.qMark ? String(play.quarter) : "auto");
   const actList = (play.unit === "offense" ? OFF_ACTIONS : play.unit === "defense" ? DEF_ACTIONS : ST_ACTIONS)
     .concat([{ key: "team", label: "Snap, no stat" },
-      { key: "stopconv", label: "Stopped their try" }, { key: "block", label: "Blocked the kick" }]);
+      { key: "stopconv", label: "Stopped their try" }, { key: "block", label: "Blocked the kick" },
+      { key: "theirpunt", label: "Their punt — no return" }]);
   const isLoss = action === "sack" || action === "tfl";
   const isPass = play.unit === "offense" && (action === "catch" || action === "incomplete");
+  const isTheirPunt = action === "theirpunt";
 
   const save = () => {
     /* "auto" = no mark on this play (clearing one if present); a number
@@ -1163,8 +1165,11 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
         onSave(Object.assign({ score, action: null, pts: ((scores.find((x) => x.key === score)) || {}).pts || 0,
           yards: score === "td" ? parseInt(yards, 10) || 0 : 0 }, qPatch));
       }
+    } else if (isTheirPunt) {
+      onSave(Object.assign({ them: true, action: "punt", playerId: null, passerId: null,
+        score: null, pts: null, yards: Math.abs(parseInt(yards, 10) || 0) }, qPatch));
     } else {
-      onSave(Object.assign({ playerId: playerId || null, action: action || null,
+      onSave(Object.assign({ playerId: playerId || null, action: action || null, them: null,
         yards: isLoss ? Math.abs(parseInt(yards, 10) || 0) : parseInt(yards, 10) || 0,
         score: score !== "none" ? score : null,
         pts: score !== "none" ? ((scores.find((x) => x.key === score)) || {}).pts || 0 : null,
@@ -1252,17 +1257,21 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
 
         {!isPen && !isThem && (
           <React.Fragment>
-            <div className="eyebrow" style={{ marginBottom: 6 }}>Player</div>
-            <select className="inp" aria-label="Player" value={playerId} onChange={(e) => setPlayerId(e.target.value)}>
-              <option value="">Whole unit</option>
-              {roster.map((p) => <option key={p.id} value={p.id}>#{p.num} {p.name}</option>)}
-            </select>
+            {!isTheirPunt && (
+              <React.Fragment>
+                <div className="eyebrow" style={{ marginBottom: 6 }}>Player</div>
+                <select className="inp" aria-label="Player" value={playerId} onChange={(e) => setPlayerId(e.target.value)}>
+                  <option value="">Whole unit</option>
+                  {roster.map((p) => <option key={p.id} value={p.id}>#{p.num} {p.name}</option>)}
+                </select>
+              </React.Fragment>
+            )}
             <div className="eyebrow" style={{ margin: "12px 0 6px" }}>What happened</div>
             <select className="inp" aria-label="What happened" value={action} onChange={(e) => setAction(e.target.value)}>
               {actList.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
             </select>
             <div className="eyebrow" style={{ margin: "12px 0 6px" }}>
-              {isLoss ? "Yards they lost" : "Yards"}</div>
+              {isLoss ? "Yards they lost" : isTheirPunt ? "How far did the punt go?" : "Yards"}</div>
             <select className="inp" aria-label="Yards" value={yards}
               onChange={(e) => setYards(parseInt(e.target.value, 10))}>
               {(isLoss ? Array.from({ length: 31 }, (_, i) => i)
@@ -1282,11 +1291,15 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
                 </select>
               </React.Fragment>
             )}
-            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Points on the play</div>
-            <select className="inp" aria-label="Points on the play" value={score}
-              onChange={(e) => setScore(e.target.value)}>
-              {scores.map((s) => <option key={s.key} value={s.key}>{s.label}{s.pts ? " (+" + s.pts + ")" : ""}</option>)}
-            </select>
+            {!isTheirPunt && (
+              <React.Fragment>
+                <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Points on the play</div>
+                <select className="inp" aria-label="Points on the play" value={score}
+                  onChange={(e) => setScore(e.target.value)}>
+                  {scores.map((s) => <option key={s.key} value={s.key}>{s.label}{s.pts ? " (+" + s.pts + ")" : ""}</option>)}
+                </select>
+              </React.Fragment>
+            )}
           </React.Fragment>
         )}
 

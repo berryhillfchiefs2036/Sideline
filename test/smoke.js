@@ -756,6 +756,25 @@ const type = (el, val) => {
   ok("clearing the mark removes the boundary",
     !$$(".eyebrow").some((e) => e.textContent.trim() === "Quarter 1"));
 
+  console.log("\nedit a play into their punt");
+  click($(".logline [aria-label='Edit this play']"));
+  await flush();
+  const actEdit = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "What happened");
+  const tpOpt = Array.from(actEdit.options).find((o) => o.textContent.indexOf("Their punt") >= 0);
+  ok("their-punt option available in the editor", !!tpOpt);
+  sSetter.call(actEdit, tpOpt.value);
+  actEdit.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  const tpYds = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Yards");
+  sSetter.call(tpYds, "20");
+  tpYds.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Save the fix"));
+  await flush();
+  const convertedLine = byText(".logline", "punt — no return");
+  ok("play converted to their 20-yard punt", !!convertedLine && convertedLine.textContent.indexOf("20 yd") >= 0);
+  ok("possession flipped to us at 1st & 10", $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("1st & 10") >= 0);
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

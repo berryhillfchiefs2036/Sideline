@@ -2037,9 +2037,13 @@ function EditPlaySheet({
   }, {
     key: "block",
     label: "Blocked the kick"
+  }, {
+    key: "theirpunt",
+    label: "Their punt — no return"
   }]);
   const isLoss = action === "sack" || action === "tfl";
   const isPass = play.unit === "offense" && (action === "catch" || action === "incomplete");
+  const isTheirPunt = action === "theirpunt";
   const save = () => {
     /* "auto" = no mark on this play (clearing one if present); a number
        marks that quarter as starting here. */
@@ -2072,10 +2076,21 @@ function EditPlaySheet({
           yards: score === "td" ? parseInt(yards, 10) || 0 : 0
         }, qPatch));
       }
+    } else if (isTheirPunt) {
+      onSave(Object.assign({
+        them: true,
+        action: "punt",
+        playerId: null,
+        passerId: null,
+        score: null,
+        pts: null,
+        yards: Math.abs(parseInt(yards, 10) || 0)
+      }, qPatch));
     } else {
       onSave(Object.assign({
         playerId: playerId || null,
         action: action || null,
+        them: null,
         yards: isLoss ? Math.abs(parseInt(yards, 10) || 0) : parseInt(yards, 10) || 0,
         score: score !== "none" ? score : null,
         pts: score !== "none" ? (scores.find(x => x.key === score) || {}).pts || 0 : null,
@@ -2217,7 +2232,7 @@ function EditPlaySheet({
   }, (_, i) => i).map(y => /*#__PURE__*/React.createElement("option", {
     key: y,
     value: y
-  }, y, " ", y === 1 ? "yard" : "yards"))))), !isPen && !isThem && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, y, " ", y === 1 ? "yard" : "yards"))))), !isPen && !isThem && /*#__PURE__*/React.createElement(React.Fragment, null, !isTheirPunt && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       marginBottom: 6
@@ -2232,7 +2247,7 @@ function EditPlaySheet({
   }, "Whole unit"), roster.map(p => /*#__PURE__*/React.createElement("option", {
     key: p.id,
     value: p.id
-  }, "#", p.num, " ", p.name))), /*#__PURE__*/React.createElement("div", {
+  }, "#", p.num, " ", p.name)))), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       margin: "12px 0 6px"
@@ -2250,7 +2265,7 @@ function EditPlaySheet({
     style: {
       margin: "12px 0 6px"
     }
-  }, isLoss ? "Yards they lost" : "Yards"), /*#__PURE__*/React.createElement("select", {
+  }, isLoss ? "Yards they lost" : isTheirPunt ? "How far did the punt go?" : "Yards"), /*#__PURE__*/React.createElement("select", {
     className: "inp",
     "aria-label": "Yards",
     value: yards,
@@ -2277,7 +2292,7 @@ function EditPlaySheet({
   }, "No passer / not sure"), roster.map(p => /*#__PURE__*/React.createElement("option", {
     key: p.id,
     value: p.id
-  }, "#", p.num, " ", p.name)))), /*#__PURE__*/React.createElement("div", {
+  }, "#", p.num, " ", p.name)))), !isTheirPunt && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       margin: "12px 0 6px"
@@ -2290,7 +2305,7 @@ function EditPlaySheet({
   }, scores.map(s => /*#__PURE__*/React.createElement("option", {
     key: s.key,
     value: s.key
-  }, s.label, s.pts ? " (+" + s.pts + ")" : "")))), /*#__PURE__*/React.createElement("button", {
+  }, s.label, s.pts ? " (+" + s.pts + ")" : ""))))), /*#__PURE__*/React.createElement("button", {
     className: "confirm",
     onClick: save
   }, "Save the fix")));
