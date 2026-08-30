@@ -775,6 +775,29 @@ const type = (el, val) => {
   ok("play converted to their 20-yard punt", !!convertedLine && convertedLine.textContent.indexOf("20 yd") >= 0);
   ok("possession flipped to us at 1st & 10", $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("1st & 10") >= 0);
 
+  console.log("\ninsert a missed play");
+  click($$(".logline [aria-label='Add a missed play after this one']")[2]);
+  await flush();
+  const insUnit = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Unit");
+  ok("insert sheet opened", !!insUnit);
+  sSetter.call(insUnit, "offense");
+  insUnit.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  const insPlayer = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Player");
+  const nicoIns = Array.from(insPlayer.options).find((o) => o.textContent.indexOf("Nico") >= 0);
+  sSetter.call(insPlayer, nicoIns.value);
+  insPlayer.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  const insYards = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Yards");
+  sSetter.call(insYards, "8");
+  insYards.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Add the play"));
+  await flush();
+  const nicoLine = byText(".logline", "Nico");
+  ok("missed play slotted into the sequence", !!nicoLine && nicoLine.textContent.indexOf("ran 8 yd") >= 0);
+  ok("inserted play is not the latest line", $$(".logline")[0].textContent.indexOf("Nico") < 0);
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);
