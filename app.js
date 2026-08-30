@@ -1284,6 +1284,42 @@ function Sideline() {
       });
       setSheet(null);
     }
+  }), sheet && sheet.type === "quarter" && /*#__PURE__*/React.createElement(QuarterSheet, {
+    quarter: game.quarter,
+    onClose: () => setSheet(null),
+    onAdvance: q => {
+      addOp({
+        type: "set",
+        field: "quarter",
+        value: q
+      });
+      /* Halftime ends the drive: fresh 1st & 10 for the second half. */
+      if (q === 3) {
+        addOp({
+          type: "set",
+          field: "down",
+          value: 1
+        });
+        addOp({
+          type: "set",
+          field: "distance",
+          value: 10
+        });
+      }
+      setSheet(null);
+    },
+    onBack: q => {
+      addOp({
+        type: "set",
+        field: "quarter",
+        value: q
+      });
+      setSheet(null);
+    },
+    onEndGame: () => {
+      setSheet(null);
+      endGame();
+    }
   }), sheet && sheet.type === "spot" && /*#__PURE__*/React.createElement(SpotSheet, {
     spot: game.spot,
     onClose: () => setSheet(null),
@@ -1449,7 +1485,9 @@ function GameTab({
     value: game.distance
   }, game.distance, " yards to go")), /*#__PURE__*/React.createElement("button", {
     className: "chip",
-    onClick: () => set("quarter", game.quarter % 4 + 1)
+    onClick: () => setSheet({
+      type: "quarter"
+    })
   }, "Q", game.quarter), /*#__PURE__*/React.createElement("button", {
     className: "chip" + (game.spot != null ? " on" : ""),
     onClick: () => setSheet({
@@ -2323,6 +2361,55 @@ function ThemSheet({
       }
     }
   }, isStop ? "Log the stop" : score === "punt" ? "Log the punt" : "Put it on their side")));
+}
+function QuarterSheet({
+  quarter,
+  onAdvance,
+  onBack,
+  onEndGame,
+  onClose
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "veil",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sheet",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sheet-hd"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "sheet-ttl"
+  }, "Quarter ", quarter), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, quarter === 2 ? "Halftime comes next" : quarter === 4 ? "Last quarter" : "Game clock")), /*#__PURE__*/React.createElement("button", {
+    className: "close",
+    onClick: onClose
+  }, "Done")), quarter < 4 && /*#__PURE__*/React.createElement("button", {
+    className: "confirm",
+    style: {
+      marginTop: 0
+    },
+    onClick: () => onAdvance(quarter + 1)
+  }, quarter === 2 ? "End the half — start quarter 3" : "End quarter " + quarter + " — start quarter " + (quarter + 1)), quarter === 2 && /*#__PURE__*/React.createElement("div", {
+    className: "empty-note",
+    style: {
+      textAlign: "left",
+      marginTop: 10
+    }
+  }, "Ending the half resets the board to 1st & 10 for the second-half kickoff. Pick who has the ball with the unit buttons, and re-mark the ball spot if you're tracking it."), quarter === 4 && /*#__PURE__*/React.createElement("button", {
+    className: "confirm",
+    style: {
+      marginTop: 0
+    },
+    onClick: onEndGame
+  }, "End the game \u2014 save it to the Season"), quarter > 1 && /*#__PURE__*/React.createElement("button", {
+    className: "abtn ghost",
+    style: {
+      width: "100%",
+      marginTop: 10
+    },
+    onClick: () => onBack(quarter - 1)
+  }, "Go back to quarter ", quarter - 1)));
 }
 function SpotSheet({
   spot,

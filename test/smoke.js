@@ -698,6 +698,28 @@ const type = (el, val) => {
   click(byText(".nav button", "Game"));
   await flush();
 
+  console.log("\nend of quarter and half");
+  click(byText(".chip", "Q1"));
+  await flush();
+  ok("quarter sheet opened", !!byText(".confirm", "End quarter 1"));
+  click(byText(".confirm", "End quarter 1"));
+  await flush();
+  ok("quarter advanced to Q2", !!byText(".chip", "Q2"));
+  click(byText(".chip", "2nd"));
+  await flush();
+  click(byText(".chip", "Q2"));
+  await flush();
+  click(byText(".confirm", "End the half"));
+  await flush();
+  ok("second half starts in Q3", !!byText(".chip", "Q3"));
+  ok("halftime resets the board to 1st & 10",
+    $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("1st & 10") >= 0);
+  click(byText(".chip", "Q3"));
+  await flush();
+  ok("a mis-tap can go back a quarter", !!byText(".abtn", "Go back to quarter 2"));
+  click(byText(".close", "Done"));
+  await flush();
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

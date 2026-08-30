@@ -695,6 +695,19 @@ function Sideline() {
               them: ours ? null : true, score, pts, snaps: fieldIds });
             setSheet(null);
           }} />)}
+      {sheet && sheet.type === "quarter" && (
+        <QuarterSheet quarter={game.quarter} onClose={() => setSheet(null)}
+          onAdvance={(q) => {
+            addOp({ type: "set", field: "quarter", value: q });
+            /* Halftime ends the drive: fresh 1st & 10 for the second half. */
+            if (q === 3) {
+              addOp({ type: "set", field: "down", value: 1 });
+              addOp({ type: "set", field: "distance", value: 10 });
+            }
+            setSheet(null);
+          }}
+          onBack={(q) => { addOp({ type: "set", field: "quarter", value: q }); setSheet(null); }}
+          onEndGame={() => { setSheet(null); endGame(); }} />)}
       {sheet && sheet.type === "spot" && (
         <SpotSheet spot={game.spot} onClose={() => setSheet(null)}
           onSet={(v) => { addOp({ type: "set", field: "spot", value: v }); setSheet(null); }} />)}
@@ -772,7 +785,7 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
             ))}
             {game.distance > 100 && <option value={game.distance}>{game.distance} yards to go</option>}
           </select>
-          <button className="chip" onClick={() => set("quarter", (game.quarter % 4) + 1)}>Q{game.quarter}</button>
+          <button className="chip" onClick={() => setSheet({ type: "quarter" })}>Q{game.quarter}</button>
           <button className={"chip" + (game.spot != null ? " on" : "")} onClick={() => setSheet({ type: "spot" })}>
             {game.spot != null ? "◉ " + spotLabel(game.spot) : "Ball spot"}</button>
         </div>
@@ -1321,6 +1334,42 @@ function ThemSheet({ scores, roster, onClose, onLog }) {
               yards: score === "td" || score === "punt" ? yards : 0 });
           }
         }}>{isStop ? "Log the stop" : score === "punt" ? "Log the punt" : "Put it on their side"}</button>
+      </div>
+    </div>
+  );
+}
+
+function QuarterSheet({ quarter, onAdvance, onBack, onEndGame, onClose }) {
+  return (
+    <div className="veil" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-hd">
+          <div>
+            <div className="sheet-ttl">Quarter {quarter}</div>
+            <div className="eyebrow">
+              {quarter === 2 ? "Halftime comes next" : quarter === 4 ? "Last quarter" : "Game clock"}</div>
+          </div>
+          <button className="close" onClick={onClose}>Done</button>
+        </div>
+        {quarter < 4 && (
+          <button className="confirm" style={{ marginTop: 0 }} onClick={() => onAdvance(quarter + 1)}>
+            {quarter === 2 ? "End the half — start quarter 3"
+              : "End quarter " + quarter + " — start quarter " + (quarter + 1)}</button>
+        )}
+        {quarter === 2 && (
+          <div className="empty-note" style={{ textAlign: "left", marginTop: 10 }}>
+            Ending the half resets the board to 1st &amp; 10 for the second-half kickoff. Pick who has
+            the ball with the unit buttons, and re-mark the ball spot if you're tracking it.
+          </div>
+        )}
+        {quarter === 4 && (
+          <button className="confirm" style={{ marginTop: 0 }} onClick={onEndGame}>
+            End the game — save it to the Season</button>
+        )}
+        {quarter > 1 && (
+          <button className="abtn ghost" style={{ width: "100%", marginTop: 10 }} onClick={() => onBack(quarter - 1)}>
+            Go back to quarter {quarter - 1}</button>
+        )}
       </div>
     </div>
   );
