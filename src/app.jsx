@@ -213,6 +213,8 @@ function useSideline() {
   const dirty = useRef(false);
   const meRef = useRef(me);
   meRef.current = me;
+  const squadRef = useRef(squad);
+  squadRef.current = squad;
 
   /* ---- writers ---- */
   const pushOps = useCallback(async (ops, who) => {
@@ -371,7 +373,10 @@ function useSideline() {
   }, [code, pull]);
 
   /* ---- crew membership ---- */
-  const joinCrew = useCallback((c, name) => {
+  /* carrySquad: when starting a brand-new crew, bring the current roster,
+     lineups, and schedule along instead of starting the crew empty. Joining
+     an existing code never does this, so a joiner can't clobber the crew. */
+  const joinCrew = useCallback((c, name, carrySquad) => {
     const clean = (c || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
     if (clean.length < 4) return;
     const next = { id: meRef.current.id, name: name !== undefined ? name : meRef.current.name };
@@ -379,7 +384,17 @@ function useSideline() {
     LS.set(K_ME, Object.assign({}, next, { code: clean }));
     setTheirs({});
     setMine(LS.get(kCrewOps(clean), []));
-    setSquadLocal(LS.get(kCrewSquad(clean), freshSquad()));
+    const stored = LS.get(kCrewSquad(clean), null);
+    const hasPlayers = (sq) => !!(sq && sq.roster && sq.roster.length);
+    if (carrySquad && !hasPlayers(stored) && hasPlayers(squadRef.current)) {
+      const carried = Object.assign({}, squadRef.current, { rev: Date.now() });
+      LS.set(kCrewSquad(clean), carried);
+      setSquadLocal(carried);
+      if (sb) sb.from(T_SQUAD).upsert({ game_code: clean, squad: carried, rev: carried.rev },
+        { onConflict: "game_code" }).then(() => {});
+    } else {
+      setSquadLocal(stored || freshSquad());
+    }
     setGamesLocal(LS.get(kCrewGames(clean), []));
     setSync({ state: "connecting", coaches: 1, at: null });
     setCode(clean);
@@ -865,7 +880,10 @@ function CrewSheet({ me, code, sync, available, onJoin, onLeave, onRename, onClo
             </div>
             <div className="eyebrow" style={{ marginBottom: 6 }}>Start a crew</div>
             <button className="confirm" style={{ marginTop: 0 }} disabled={!available}
-              onClick={() => onJoin(makeCode(), name)}>Create a code</button>
+              onClick={() => onJoin(makeCode(), name, true)}>Create a code</button>
+            <div style={{ fontSize: 12, color: "var(--soft)", marginTop: 6, lineHeight: 1.4 }}>
+              Your roster, lineups, and schedule come with you — the other coaches see them as soon as they join.
+            </div>
             <div className="eyebrow" style={{ margin: "18px 0 6px" }}>Or join one</div>
             <input className="inp code-inp" placeholder="CODE" maxLength={4} value={entry}
               onChange={(e) => setEntry(e.target.value.toUpperCase())} />
