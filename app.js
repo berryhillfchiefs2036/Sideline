@@ -318,6 +318,9 @@ const VERB = {
   onsidewon: "onside kick — we got it!",
   onsidelost: "onside kick — they got it"
 };
+
+/* Short team tag for tight spots (scoreboard corners, field scale). */
+const abbr = s => ((s || "").trim().split(/\s+/)[0] || "").slice(0, 4).toUpperCase() || "—";
 const uid = () => Math.random().toString(36).slice(2, 9);
 const mkSlots = labels => labels.map(l => ({
   id: uid(),
@@ -801,9 +804,11 @@ function boxScoreText(rec) {
     names[r.id] = "#" + r.num + " " + r.name;
   });
   const who = id => names[id] || "Team";
+  const usName = ((rec.team || "") + "").trim() || "Us";
+  const oppName = ((rec.opponent || "") + "").trim() || "Them";
   const res = rec.us > rec.them ? "W" : rec.us < rec.them ? "L" : "T";
   const L = [];
-  L.push("FINAL" + (rec.scrim ? " (scrimmage)" : "") + ": Us " + rec.us + " — " + (rec.opponent || "Them") + " " + rec.them + " (" + res + ")");
+  L.push("FINAL" + (rec.scrim ? " (scrimmage)" : "") + ": " + usName + " " + rec.us + " — " + oppName + " " + rec.them + " (" + res + ")");
   if (rec.endedAt) L.push(new Date(rec.endedAt).toLocaleDateString());
   L.push("");
   L.push("Team");
@@ -821,8 +826,8 @@ function boxScoreText(rec) {
       const sc = SCORES.find(x => x.key === p.score);
       const pts = p.pts != null ? p.pts : sc ? sc.pts : 0;
       const ours = !p.them && (p.unit !== "defense" || p.score === "td" || p.score === "safety");
-      const desc = p.them ? "Their " + (sc ? sc.label.toLowerCase() : "score") + (p.yards ? ", " + p.yards + " yd" : "") : who(p.playerId) + (VERB[p.action] ? " " + VERB[p.action] : "") + (p.yards ? " " + p.yards + " yd" : "") + (sc ? " — " + sc.label : "");
-      L.push("Q" + p.quarter + "  " + desc + "  (+" + pts + (ours ? " us" : " them") + ")");
+      const desc = p.them ? oppName + " " + (sc ? sc.label.toLowerCase() : "score") + (p.yards ? ", " + p.yards + " yd" : "") : who(p.playerId) + (VERB[p.action] ? " " + VERB[p.action] : "") + (p.yards ? " " + p.yards + " yd" : "") + (sc ? " — " + sc.label : "");
+      L.push("Q" + p.quarter + "  " + desc + "  (+" + pts + " " + abbr(ours ? usName : oppName) + ")");
     });
   }
   const P = rec.players || [];
@@ -1304,6 +1309,11 @@ function Sideline() {
     });
     return m;
   }, [roster]);
+
+  /* The team's own name replaces "Us" across the app once it's set (Season
+     tab); the other side shows the tracked opponent when there is one. */
+  const teamName = ((squad.teamName || "") + "").trim();
+  const oppName = (((game.gameInfo || {}).opponent || "") + "").trim();
   const unitSlots = (unit === "special" ? lineups.special[stKey] : lineups[unit]) || [];
   const sKey = unit === "special" ? stKey : "u";
   const swaps = (game.swaps[unit] || {})[sKey] || {};
@@ -1539,7 +1549,9 @@ function Sideline() {
     movingPlay,
     setMovingPlay,
     placeAfter,
-    placeFirst
+    placeFirst,
+    teamName,
+    oppName
   }), tab === "roster" && /*#__PURE__*/React.createElement(RosterTab, {
     squad: squad,
     setSquad: setSquad,
@@ -1552,11 +1564,13 @@ function Sideline() {
     statOf,
     minPlays,
     game,
+    teamName,
     onEndGame: endGame
   }), tab === "season" && /*#__PURE__*/React.createElement(SeasonTab, {
     games: S.games,
     squad: squad,
     setSquad: setSquad,
+    teamName: teamName,
     onEdit: S.editGame,
     onRemove: S.removeGame,
     onImport: S.importGames,
@@ -1608,6 +1622,7 @@ function Sideline() {
     play: sheet.play,
     roster: roster,
     scores: scores,
+    teamName: teamName,
     onClose: () => setSheet(null),
     onSave: patch => {
       addOp({
@@ -1695,6 +1710,7 @@ function Sideline() {
   }), sheet && sheet.type === "pen" && /*#__PURE__*/React.createElement(PenaltySheet, {
     roster: roster,
     unit: unit,
+    teamName: teamName,
     onClose: () => setSheet(null),
     onLog: pen => {
       addOp(Object.assign({
@@ -1746,7 +1762,9 @@ function GameTab({
   movingPlay,
   setMovingPlay,
   placeAfter,
-  placeFirst
+  placeFirst,
+  teamName,
+  oppName
 }) {
   const set = (field, value) => addOp({
     type: "set",
@@ -1779,7 +1797,7 @@ function GameTab({
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, "Us"), /*#__PURE__*/React.createElement("div", {
+  }, teamName ? abbr(teamName) : "Us"), /*#__PURE__*/React.createElement("div", {
     className: "score-num"
   }, game.us), /*#__PURE__*/React.createElement("div", {
     className: "score-btns"
@@ -1807,7 +1825,7 @@ function GameTab({
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, "Them"), /*#__PURE__*/React.createElement("div", {
+  }, oppName ? abbr(oppName) : "Them"), /*#__PURE__*/React.createElement("div", {
     className: "score-num"
   }, game.them), /*#__PURE__*/React.createElement("div", {
     className: "score-btns"
@@ -1977,6 +1995,8 @@ function GameTab({
     game: game,
     byId: byId,
     addOp: addOp,
+    teamName: teamName,
+    oppName: oppName,
     onEdit: p => setSheet({
       type: "editplay",
       play: p
@@ -2024,6 +2044,8 @@ function PlayLog({
   game,
   byId,
   addOp,
+  teamName,
+  oppName,
   onEdit,
   onInsert,
   movingPlay,
@@ -2085,7 +2107,7 @@ function PlayLog({
         style: {
           color: "var(--stop)"
         }
-      }, "Flag"), " ", pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : p.ours ? "on us" : "on them", " — ", pk ? pk.label : "penalty", ", ", p.yards, " yd"), /*#__PURE__*/React.createElement("span", {
+      }, "Flag"), " ", pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : p.ours ? "on " + (teamName || "us") : "on " + (oppName || "them"), " — ", pk ? pk.label : "penalty", ", ", p.yards, " yd"), /*#__PURE__*/React.createElement("span", {
         className: "who"
       }, p.byName || ""), /*#__PURE__*/React.createElement("button", {
         className: "mini",
@@ -2133,7 +2155,7 @@ function PlayLog({
       key: p.id
     }, qBreak, /*#__PURE__*/React.createElement("div", lineProps(p), /*#__PURE__*/React.createElement("span", {
       className: "eyebrow"
-    }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : /*#__PURE__*/React.createElement("b", null, p.them ? "Their team" : "Whole unit"), " ", p.them && p.yards ? p.yards + " yd " : "", VERB[p.action] || "", " ", ["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : "", ["sack", "tfl"].indexOf(p.action) >= 0 && p.yards ? "−" + p.yards + " yd" : "", p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : "", p.assistIds && p.assistIds.length ? " · assist " + p.assistIds.map(id => byId[id] ? "#" + byId[id].num : "").join(", ") : "", sc && /*#__PURE__*/React.createElement("span", {
+    }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : /*#__PURE__*/React.createElement("b", null, p.them ? oppName || "Their team" : "Whole unit"), " ", p.them && p.yards ? p.yards + " yd " : "", VERB[p.action] || "", " ", ["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : "", ["sack", "tfl"].indexOf(p.action) >= 0 && p.yards ? "−" + p.yards + " yd" : "", p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : "", p.assistIds && p.assistIds.length ? " · assist " + p.assistIds.map(id => byId[id] ? "#" + byId[id].num : "").join(", ") : "", sc && /*#__PURE__*/React.createElement("span", {
       style: {
         color: "var(--stop)",
         fontWeight: 700
@@ -2465,6 +2487,7 @@ function EditPlaySheet({
   play,
   roster,
   scores,
+  teamName,
   onSave,
   onClose
 }) {
@@ -2616,7 +2639,7 @@ function EditPlaySheet({
     value: "them"
   }, "The other team"), /*#__PURE__*/React.createElement("option", {
     value: "us"
-  }, "Us \u2014 no one in particular"), roster.map(p => /*#__PURE__*/React.createElement("option", {
+  }, teamName || "Us", " \u2014 no one in particular"), roster.map(p => /*#__PURE__*/React.createElement("option", {
     key: p.id,
     value: p.id
   }, "#", p.num, " ", p.name))), /*#__PURE__*/React.createElement("div", {
@@ -3253,6 +3276,7 @@ function SpotSheet({
 function PenaltySheet({
   roster,
   unit,
+  teamName,
   onClose,
   onLog
 }) {
@@ -3300,7 +3324,7 @@ function PenaltySheet({
     value: "them"
   }, "The other team"), /*#__PURE__*/React.createElement("option", {
     value: "us"
-  }, "Us \u2014 no one in particular"), roster.map(p => /*#__PURE__*/React.createElement("option", {
+  }, teamName || "Us", " \u2014 no one in particular"), roster.map(p => /*#__PURE__*/React.createElement("option", {
     key: p.id,
     value: p.id
   }, "#", p.num, " ", p.name))), /*#__PURE__*/React.createElement("div", {
@@ -3816,30 +3840,7 @@ function RosterTab({
     value: "elementary"
   }, "Elementary \u2014 kick +2 \xB7 run/pass +1"), /*#__PURE__*/React.createElement("option", {
     value: "highschool"
-  }, "High school \u2014 kick +1 \xB7 run/pass +2"))), /*#__PURE__*/React.createElement("div", {
-    className: "sechd"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "h2"
-  }, "Team name")), /*#__PURE__*/React.createElement("div", {
-    className: "row"
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      flex: 1,
-      fontSize: 14,
-      color: "var(--soft)"
-    }
-  }, "Shows on the fan gamecast \u2014 your team defends the left end zone."), /*#__PURE__*/React.createElement("input", {
-    className: "inp",
-    "aria-label": "Team name",
-    style: {
-      width: 150
-    },
-    placeholder: "Chiefs",
-    value: squad.teamName || "",
-    onChange: e => setSquad(s => Object.assign({}, s, {
-      teamName: e.target.value
-    }))
-  })));
+  }, "High school \u2014 kick +1 \xB7 run/pass +2"))));
 }
 
 /* ============================ LINEUPS ============================ */
@@ -3992,6 +3993,7 @@ function StatsTab({
   statOf,
   minPlays,
   game,
+  teamName,
   onEndGame
 }) {
   const [view, setView] = useState("plays");
@@ -4017,6 +4019,7 @@ function StatsTab({
     const info = game.gameInfo || {};
     shareText(boxScoreText({
       opponent: info.opponent || "",
+      team: teamName,
       endedAt: new Date().toISOString(),
       us: game.us,
       them: game.them,
@@ -4447,6 +4450,7 @@ function SeasonTab({
   games,
   squad,
   setSquad,
+  teamName,
   onEdit,
   onRemove,
   onImport,
@@ -4533,11 +4537,34 @@ function SeasonTab({
     style: {
       color: "#8FA394"
     }
-  }, year === "all" ? "Team record — all years" : "Team record — " + year), /*#__PURE__*/React.createElement("div", {
+  }, (teamName || "Team") + " record — " + (year === "all" ? "all years" : year)), /*#__PURE__*/React.createElement("div", {
     className: "dd-main"
   }, wins, "\u2013", losses, ties ? "–" + ties : ""), /*#__PURE__*/React.createElement("div", {
     className: "dd-sub"
-  }, pf, " scored \xB7 ", pa, " allowed")), /*#__PURE__*/React.createElement(ScheduleSection, {
+  }, pf, " scored \xB7 ", pa, " allowed")), /*#__PURE__*/React.createElement("div", {
+    className: "sechd"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h2"
+  }, "Team name")), /*#__PURE__*/React.createElement("div", {
+    className: "row"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      fontSize: 14,
+      color: "var(--soft)"
+    }
+  }, "Replaces \"Us\" across the app and names your side of the fan gamecast field."), /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    "aria-label": "Team name",
+    style: {
+      width: 150
+    },
+    placeholder: "Chiefs",
+    value: squad.teamName || "",
+    onChange: e => setSquad(s => Object.assign({}, s, {
+      teamName: e.target.value
+    }))
+  })), /*#__PURE__*/React.createElement(ScheduleSection, {
     squad: squad,
     setSquad: setSquad,
     onTrack: onTrack
@@ -4748,7 +4775,9 @@ function SeasonTab({
     onClick: () => onReopen(g)
   }, "Reopen"), /*#__PURE__*/React.createElement("button", {
     className: "mini",
-    onClick: () => shareText(boxScoreText(g))
+    onClick: () => shareText(boxScoreText(Object.assign({
+      team: teamName
+    }, g)))
   }, "Box"), /*#__PURE__*/React.createElement("button", {
     className: "mini",
     onClick: () => setEditingGame({
@@ -4875,7 +4904,6 @@ function GameCast({
      line to gain, worked out from the down & distance and who has the ball. */
   const ourName = ((squad.teamName || "") + "").trim() || "Us";
   const oppName = ((game.gameInfo && game.gameInfo.opponent || "") + "").trim() || "Them";
-  const abbr = s => (s.trim().split(/\s+/)[0] || s).slice(0, 4).toUpperCase();
   const drives = computeDrives(game.plays);
   const lastDrive = drives.length ? drives[drives.length - 1] : null;
   const curDrive = lastDrive && lastDrive.result === "On the field" ? lastDrive : null;

@@ -114,6 +114,9 @@ const VERB = { rush: "ran", catch: "caught", pass: "threw", incomplete: "incompl
   pickedoff: "pass picked off", touchback: "kickoff — touchback",
   onsidewon: "onside kick — we got it!", onsidelost: "onside kick — they got it" };
 
+/* Short team tag for tight spots (scoreboard corners, field scale). */
+const abbr = (s) => ((s || "").trim().split(/\s+/)[0] || "").slice(0, 4).toUpperCase() || "—";
+
 const uid = () => Math.random().toString(36).slice(2, 9);
 const mkSlots = (labels) => labels.map((l) => ({ id: uid(), label: l, playerId: null, backupId: null }));
 const freshLineups = () => ({
@@ -404,10 +407,12 @@ function boxScoreText(rec) {
   const names = {};
   (rec.players || []).forEach((r) => { names[r.id] = "#" + r.num + " " + r.name; });
   const who = (id) => names[id] || "Team";
+  const usName = ((rec.team || "") + "").trim() || "Us";
+  const oppName = ((rec.opponent || "") + "").trim() || "Them";
   const res = rec.us > rec.them ? "W" : rec.us < rec.them ? "L" : "T";
   const L = [];
-  L.push("FINAL" + (rec.scrim ? " (scrimmage)" : "") + ": Us " + rec.us + " — " +
-    (rec.opponent || "Them") + " " + rec.them + " (" + res + ")");
+  L.push("FINAL" + (rec.scrim ? " (scrimmage)" : "") + ": " + usName + " " + rec.us + " — " +
+    oppName + " " + rec.them + " (" + res + ")");
   if (rec.endedAt) L.push(new Date(rec.endedAt).toLocaleDateString());
   L.push("");
   L.push("Team");
@@ -429,10 +434,10 @@ function boxScoreText(rec) {
       const pts = p.pts != null ? p.pts : sc ? sc.pts : 0;
       const ours = !p.them && (p.unit !== "defense" || p.score === "td" || p.score === "safety");
       const desc = p.them
-        ? "Their " + (sc ? sc.label.toLowerCase() : "score") + (p.yards ? ", " + p.yards + " yd" : "")
+        ? oppName + " " + (sc ? sc.label.toLowerCase() : "score") + (p.yards ? ", " + p.yards + " yd" : "")
         : who(p.playerId) + (VERB[p.action] ? " " + VERB[p.action] : "") +
           (p.yards ? " " + p.yards + " yd" : "") + (sc ? " — " + sc.label : "");
-      L.push("Q" + p.quarter + "  " + desc + "  (+" + pts + (ours ? " us" : " them") + ")");
+      L.push("Q" + p.quarter + "  " + desc + "  (+" + pts + " " + abbr(ours ? usName : oppName) + ")");
     });
   }
   const P = rec.players || [];
@@ -761,6 +766,11 @@ function Sideline() {
     const m = {}; roster.forEach((p) => { m[p.id] = p; }); return m;
   }, [roster]);
 
+  /* The team's own name replaces "Us" across the app once it's set (Season
+     tab); the other side shows the tracked opponent when there is one. */
+  const teamName = ((squad.teamName || "") + "").trim();
+  const oppName = (((game.gameInfo || {}).opponent || "") + "").trim();
+
   const unitSlots = (unit === "special" ? lineups.special[stKey] : lineups[unit]) || [];
   const sKey = unit === "special" ? stKey : "u";
   const swaps = (game.swaps[unit] || {})[sKey] || {};
@@ -903,11 +913,12 @@ function Sideline() {
 
         {tab === "game" && <GameTab {...{ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay,
           undo, canUndo: !!lastUndoable, roster, moving, setMoving, assign, onEndGame: endGame,
-          unit, stKey, setUnit, setStKey, movingPlay, setMovingPlay, placeAfter, placeFirst }} />}
+          unit, stKey, setUnit, setStKey, movingPlay, setMovingPlay, placeAfter, placeFirst,
+          teamName, oppName }} />}
         {tab === "roster" && <RosterTab squad={squad} setSquad={setSquad} statOf={statOf} />}
         {tab === "lineups" && <LineupsTab squad={squad} setSquad={setSquad} />}
-        {tab === "stats" && <StatsTab {...{ roster, statOf, minPlays, game }} onEndGame={endGame} />}
-        {tab === "season" && <SeasonTab games={S.games} squad={squad} setSquad={setSquad}
+        {tab === "stats" && <StatsTab {...{ roster, statOf, minPlays, game, teamName }} onEndGame={endGame} />}
+        {tab === "season" && <SeasonTab games={S.games} squad={squad} setSquad={setSquad} teamName={teamName}
           onEdit={S.editGame} onRemove={S.removeGame} onImport={S.importGames} onTrack={trackScheduled}
           reopenableId={reopenableId} onReopen={reopenGame} live={liveRec} />}
       </div>
@@ -934,7 +945,7 @@ function Sideline() {
             setSheet(null);
           }} />)}
       {sheet && sheet.type === "editplay" && (
-        <EditPlaySheet play={sheet.play} roster={roster} scores={scores}
+        <EditPlaySheet play={sheet.play} roster={roster} scores={scores} teamName={teamName}
           onClose={() => setSheet(null)}
           onSave={(patch) => { addOp({ type: "amend", target: sheet.play.id, patch }); setSheet(null); }} />)}
       {sheet && sheet.type === "them" && (
@@ -963,7 +974,7 @@ function Sideline() {
         <SpotSheet spot={game.spot} onClose={() => setSheet(null)}
           onSet={(v) => { addOp({ type: "set", field: "spot", value: v }); setSheet(null); }} />)}
       {sheet && sheet.type === "pen" && (
-        <PenaltySheet roster={roster} unit={unit} onClose={() => setSheet(null)}
+        <PenaltySheet roster={roster} unit={unit} teamName={teamName} onClose={() => setSheet(null)}
           onLog={(pen) => { addOp(Object.assign({ type: "pen", unit }, pen)); setSheet(null); }} />)}
       {sheet && sheet.type === "crew" && (
         <CrewSheet me={S.me} code={code} sync={sync} available={S.crewAvailable} onJoin={S.joinCrew}
@@ -980,7 +991,7 @@ function Sideline() {
 
 /* ============================ GAME TAB ============================ */
 
-function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay, undo, canUndo, roster, moving, setMoving, assign, onEndGame, unit, stKey, setUnit, setStKey, movingPlay, setMovingPlay, placeAfter, placeFirst }) {
+function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay, undo, canUndo, roster, moving, setMoving, assign, onEndGame, unit, stKey, setUnit, setStKey, movingPlay, setMovingPlay, placeAfter, placeFirst, teamName, oppName }) {
   const set = (field, value) => addOp({ type: "set", field, value });
   const filled = onField.filter((s) => s.playerId).length;
   const movingSlot = moving ? onField.find((s) => s.id === moving) : null;
@@ -1001,7 +1012,7 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
       <div className="board">
         <div className="board-top">
           <div className="score-blk">
-            <div className="eyebrow">Us</div>
+            <div className="eyebrow">{teamName ? abbr(teamName) : "Us"}</div>
             <div className="score-num">{game.us}</div>
             <div className="score-btns">
               <button className="tick" onClick={() => addOp({ type: "adj", team: "us", delta: -1 })}>−</button>
@@ -1014,7 +1025,7 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
               {game.spot != null ? " · ball on " + spotLabel(game.spot) : ""}</div>
           </div>
           <div className="score-blk">
-            <div className="eyebrow">Them</div>
+            <div className="eyebrow">{oppName ? abbr(oppName) : "Them"}</div>
             <div className="score-num">{game.them}</div>
             <div className="score-btns">
               <button className="tick" onClick={() => addOp({ type: "adj", team: "them", delta: -1 })}>−</button>
@@ -1120,7 +1131,7 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
         <button className="abtn ghost" disabled={!canUndo} onClick={undo}>Undo</button>
       </div>
 
-      <PlayLog game={game} byId={byId} addOp={addOp}
+      <PlayLog game={game} byId={byId} addOp={addOp} teamName={teamName} oppName={oppName}
         onEdit={(p) => setSheet({ type: "editplay", play: p })}
         onInsert={(p) => setSheet({ type: "insertplay", after: p })}
         movingPlay={movingPlay}
@@ -1149,7 +1160,7 @@ function Chain({ count, min }) {
   );
 }
 
-function PlayLog({ game, byId, addOp, onEdit, onInsert, movingPlay, onMove, onPlace, onPlaceFirst, onCancelMove }) {
+function PlayLog({ game, byId, addOp, teamName, oppName, onEdit, onInsert, movingPlay, onMove, onPlace, onPlaceFirst, onCancelMove }) {
   const [showAll, setShowAll] = useState(false);
   const all = game.plays.slice().reverse();
   const recent = showAll ? all : all.slice(0, 14);
@@ -1188,7 +1199,7 @@ function PlayLog({ game, byId, addOp, onEdit, onInsert, movingPlay, onMove, onPl
                 <span className="eyebrow">{ORD[p.down]} &amp; {p.distance}</span>
                 <span>
                   <b style={{ color: "var(--stop)" }}>Flag</b>{" "}
-                  {pl ? <b>#{pl.num} {pl.name}</b> : p.ours ? "on us" : "on them"}
+                  {pl ? <b>#{pl.num} {pl.name}</b> : p.ours ? "on " + (teamName || "us") : "on " + (oppName || "them")}
                   {" — "}{pk ? pk.label : "penalty"}, {p.yards} yd
                 </span>
                 <span className="who">{p.byName || ""}</span>
@@ -1215,7 +1226,7 @@ function PlayLog({ game, byId, addOp, onEdit, onInsert, movingPlay, onMove, onPl
             <div {...lineProps(p)}>
               <span className="eyebrow">{ORD[p.down]} &amp; {p.distance}</span>
               <span>
-                {pl ? <b>#{pl.num} {pl.name}</b> : <b>{p.them ? "Their team" : "Whole unit"}</b>}{" "}
+                {pl ? <b>#{pl.num} {pl.name}</b> : <b>{p.them ? oppName || "Their team" : "Whole unit"}</b>}{" "}
                 {p.them && p.yards ? p.yards + " yd " : ""}
                 {VERB[p.action] || ""}{" "}
                 {["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : ""}
@@ -1427,7 +1438,7 @@ function SubSheet({ slot, roster, byId, onField, statOf, minPlays, onClose, onPi
   );
 }
 
-function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
+function EditPlaySheet({ play, roster, scores, teamName, onSave, onClose }) {
   const isPen = play.type === "pen";
   const isThem = !!play.them;
   const [playerId, setPlayerId] = useState(play.playerId || "");
@@ -1519,7 +1530,7 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
             <div className="eyebrow" style={{ marginBottom: 6 }}>Who was flagged</div>
             <select className="inp" aria-label="Who was flagged" value={who} onChange={(e) => setWho(e.target.value)}>
               <option value="them">The other team</option>
-              <option value="us">Us — no one in particular</option>
+              <option value="us">{teamName || "Us"} — no one in particular</option>
               {roster.map((p) => <option key={p.id} value={p.id}>#{p.num} {p.name}</option>)}
             </select>
             <div className="eyebrow" style={{ margin: "12px 0 6px" }}>The call</div>
@@ -1944,7 +1955,7 @@ function SpotSheet({ spot, onSet, onClose }) {
   );
 }
 
-function PenaltySheet({ roster, unit, onClose, onLog }) {
+function PenaltySheet({ roster, unit, teamName, onClose, onLog }) {
   const [who, setWho] = useState("them");
   const [kind, setKind] = useState("falsestart");
   const [yards, setYards] = useState(5);
@@ -1973,7 +1984,7 @@ function PenaltySheet({ roster, unit, onClose, onLog }) {
         <div className="eyebrow" style={{ marginBottom: 6 }}>Who was flagged</div>
         <select className="inp" aria-label="Who was flagged" value={who} onChange={(e) => pickWho(e.target.value)}>
           <option value="them">The other team</option>
-          <option value="us">Us — no one in particular</option>
+          <option value="us">{teamName || "Us"} — no one in particular</option>
           {roster.map((p) => <option key={p.id} value={p.id}>#{p.num} {p.name}</option>)}
         </select>
         <div className="eyebrow" style={{ margin: "12px 0 6px" }}>The call</div>
@@ -2222,16 +2233,6 @@ function RosterTab({ squad, setSquad, statOf }) {
           <option value="highschool">High school — kick +1 · run/pass +2</option>
         </select>
       </div>
-
-      <div className="sechd"><div className="h2">Team name</div></div>
-      <div className="row">
-        <div style={{ flex: 1, fontSize: 14, color: "var(--soft)" }}>
-          Shows on the fan gamecast — your team defends the left end zone.
-        </div>
-        <input className="inp" aria-label="Team name" style={{ width: 150 }} placeholder="Chiefs"
-          value={squad.teamName || ""}
-          onChange={(e) => setSquad((s) => Object.assign({}, s, { teamName: e.target.value }))} />
-      </div>
     </React.Fragment>
   );
 }
@@ -2327,7 +2328,7 @@ function LineupsTab({ squad, setSquad }) {
 
 /* ============================ STATS ============================ */
 
-function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
+function StatsTab({ roster, statOf, minPlays, game, teamName, onEndGame }) {
   const [view, setView] = useState("plays");
   const rows = roster.map((p) => ({ p, s: statOf(p.id) }));
 
@@ -2342,7 +2343,7 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
 
   const shareBox = () => {
     const info = game.gameInfo || {};
-    shareText(boxScoreText({ opponent: info.opponent || "", endedAt: new Date().toISOString(),
+    shareText(boxScoreText({ opponent: info.opponent || "", team: teamName, endedAt: new Date().toISOString(),
       us: game.us, them: game.them, plays: game.plays, scrim: !!info.scrim,
       players: roster.map((p) => ({ id: p.id, num: p.num, name: p.name, s: statOf(p.id) }))
         .filter((r) => r.s.snaps > 0) }));
@@ -2596,7 +2597,7 @@ function ScheduleSection({ squad, setSquad, onTrack }) {
   );
 }
 
-function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack, reopenableId, onReopen, live }) {
+function SeasonTab({ games, squad, setSquad, teamName, onEdit, onRemove, onImport, onTrack, reopenableId, onReopen, live }) {
   const [year, setYear] = useState("all");
   const [view, setView] = useState("plays");
   const [editingGame, setEditingGame] = useState(null);
@@ -2678,11 +2679,21 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
       {shown.length > 0 && (
         <div className="board" style={{ textAlign: "center", marginTop: 0 }}>
           <div className="eyebrow" style={{ color: "#8FA394" }}>
-            {year === "all" ? "Team record — all years" : "Team record — " + year}</div>
+            {(teamName || "Team") + " record — " + (year === "all" ? "all years" : year)}</div>
           <div className="dd-main">{wins}–{losses}{ties ? "–" + ties : ""}</div>
           <div className="dd-sub">{pf} scored · {pa} allowed</div>
         </div>
       )}
+
+      <div className="sechd"><div className="h2">Team name</div></div>
+      <div className="row">
+        <div style={{ flex: 1, fontSize: 14, color: "var(--soft)" }}>
+          Replaces "Us" across the app and names your side of the fan gamecast field.
+        </div>
+        <input className="inp" aria-label="Team name" style={{ width: 150 }} placeholder="Chiefs"
+          value={squad.teamName || ""}
+          onChange={(e) => setSquad((s) => Object.assign({}, s, { teamName: e.target.value }))} />
+      </div>
 
       <ScheduleSection squad={squad} setSquad={setSquad} onTrack={onTrack} />
 
@@ -2817,7 +2828,7 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
               {g.id === reopenableId && (
                 <button className="mini dark" onClick={() => onReopen(g)}>Reopen</button>
               )}
-              <button className="mini" onClick={() => shareText(boxScoreText(g))}>Box</button>
+              <button className="mini" onClick={() => shareText(boxScoreText(Object.assign({ team: teamName }, g)))}>Box</button>
               <button className="mini" onClick={() => setEditingGame({ id: g.id, opponent: g.opponent || "",
                 date: (g.endedAt || "").slice(0, 10), us: String(g.us), them: String(g.them),
                 scrim: !!g.scrim })}>Edit</button>
@@ -2902,7 +2913,6 @@ function GameCast({ code }) {
      line to gain, worked out from the down & distance and who has the ball. */
   const ourName = ((squad.teamName || "") + "").trim() || "Us";
   const oppName = (((game.gameInfo && game.gameInfo.opponent) || "") + "").trim() || "Them";
-  const abbr = (s) => (s.trim().split(/\s+/)[0] || s).slice(0, 4).toUpperCase();
   const drives = computeDrives(game.plays);
   const lastDrive = drives.length ? drives[drives.length - 1] : null;
   const curDrive = lastDrive && lastDrive.result === "On the field" ? lastDrive : null;

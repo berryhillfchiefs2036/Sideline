@@ -82,11 +82,17 @@ const type = (el, val) => {
   ok("roster still has 5 players", $(".sechd .eyebrow").textContent.indexOf("5 players") >= 0);
 
   console.log("\nteam name");
+  click(byText(".nav button", "Season"));
+  await flush();
   const tnInp = $$("input").find((i) => i.getAttribute("aria-label") === "Team name");
-  ok("team name setting offered", !!tnInp);
+  ok("team name setting offered on the Season tab", !!tnInp);
   type(tnInp, "Berryhill Chiefs");
   await flush();
   ok("team name saved", JSON.parse(store["sideline.solo.squad"]).teamName === "Berryhill Chiefs");
+  click(byText(".nav button", "Game"));
+  await flush();
+  ok("scoreboard shows the team tag instead of Us",
+    $$(".score-blk .eyebrow")[0].textContent === "BERR");
 
   console.log("\nlineups");
   click(byText(".nav button", "Lineups"));
@@ -990,6 +996,7 @@ const type = (el, val) => {
   click(byText(".abtn", "Share box score"));
   await flush();
   ok("box score generated with the final line", boxText.indexOf("FINAL") === 0);
+  ok("box score leads with the team name", boxText.indexOf("Berryhill Chiefs") >= 0);
   ok("box score carries situational team stats",
     boxText.indexOf("First downs") >= 0 && boxText.indexOf("Turnovers") >= 0);
   ok("box score names the leaders", boxText.indexOf("Leaders") >= 0 && boxText.indexOf("Rushing:") >= 0);
