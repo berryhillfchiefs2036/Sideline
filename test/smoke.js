@@ -91,8 +91,8 @@ const type = (el, val) => {
   ok("team name saved", JSON.parse(store["sideline.solo.squad"]).teamName === "Berryhill Chiefs");
   click(byText(".nav button", "Game"));
   await flush();
-  ok("scoreboard shows the team tag instead of Us",
-    $$(".score-blk .eyebrow")[0].textContent === "BERR");
+  ok("scoreboard shows the full team name instead of Us",
+    $$(".score-blk .eyebrow")[0].textContent === "Berryhill Chiefs");
 
   console.log("\nlineups");
   click(byText(".nav button", "Lineups"));

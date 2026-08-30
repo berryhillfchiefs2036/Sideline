@@ -114,9 +114,6 @@ const VERB = { rush: "ran", catch: "caught", pass: "threw", incomplete: "incompl
   pickedoff: "pass picked off", touchback: "kickoff — touchback",
   onsidewon: "onside kick — we got it!", onsidelost: "onside kick — they got it" };
 
-/* Short team tag for tight spots (scoreboard corners, field scale). */
-const abbr = (s) => ((s || "").trim().split(/\s+/)[0] || "").slice(0, 4).toUpperCase() || "—";
-
 const uid = () => Math.random().toString(36).slice(2, 9);
 const mkSlots = (labels) => labels.map((l) => ({ id: uid(), label: l, playerId: null, backupId: null }));
 const freshLineups = () => ({
@@ -437,7 +434,7 @@ function boxScoreText(rec) {
         ? oppName + " " + (sc ? sc.label.toLowerCase() : "score") + (p.yards ? ", " + p.yards + " yd" : "")
         : who(p.playerId) + (VERB[p.action] ? " " + VERB[p.action] : "") +
           (p.yards ? " " + p.yards + " yd" : "") + (sc ? " — " + sc.label : "");
-      L.push("Q" + p.quarter + "  " + desc + "  (+" + pts + " " + abbr(ours ? usName : oppName) + ")");
+      L.push("Q" + p.quarter + "  " + desc + "  (+" + pts + " " + (ours ? usName : oppName) + ")");
     });
   }
   const P = rec.players || [];
@@ -1012,7 +1009,7 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
       <div className="board">
         <div className="board-top">
           <div className="score-blk">
-            <div className="eyebrow">{teamName ? abbr(teamName) : "Us"}</div>
+            <div className="eyebrow">{teamName || "Us"}</div>
             <div className="score-num">{game.us}</div>
             <div className="score-btns">
               <button className="tick" onClick={() => addOp({ type: "adj", team: "us", delta: -1 })}>−</button>
@@ -1025,7 +1022,7 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
               {game.spot != null ? " · ball on " + spotLabel(game.spot) : ""}</div>
           </div>
           <div className="score-blk">
-            <div className="eyebrow">{oppName ? abbr(oppName) : "Them"}</div>
+            <div className="eyebrow">{oppName || "Them"}</div>
             <div className="score-num">{game.them}</div>
             <div className="score-btns">
               <button className="tick" onClick={() => addOp({ type: "adj", team: "them", delta: -1 })}>−</button>
@@ -2936,7 +2933,7 @@ function GameCast({ code }) {
         <div className="board">
           <div className="board-top">
             <div className="score-blk">
-              <div className="eyebrow">{abbr(ourName)}</div>
+              <div className="eyebrow">{ourName}</div>
               <div className="score-num">{game.us}</div>
             </div>
             <div className="dd">
@@ -2944,7 +2941,7 @@ function GameCast({ code }) {
               <div className="dd-sub">Quarter {game.quarter} · {game.playCount} plays run</div>
             </div>
             <div className="score-blk">
-              <div className="eyebrow">{abbr(oppName)}</div>
+              <div className="eyebrow">{oppName}</div>
               <div className="score-num">{game.them}</div>
             </div>
           </div>
@@ -2976,7 +2973,7 @@ function GameCast({ code }) {
           <div className="gc-ez opp" />
         </div>
         <div className="gc-scale">
-          <span>{abbr(ourName)}</span><span>{abbr(oppName)}</span>
+          <span>{ourName}</span><span>{oppName}</span>
         </div>
         {game.spot == null && (
           <div className="eyebrow" style={{ textAlign: "center", marginTop: 6 }}>

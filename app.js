@@ -318,9 +318,6 @@ const VERB = {
   onsidewon: "onside kick — we got it!",
   onsidelost: "onside kick — they got it"
 };
-
-/* Short team tag for tight spots (scoreboard corners, field scale). */
-const abbr = s => ((s || "").trim().split(/\s+/)[0] || "").slice(0, 4).toUpperCase() || "—";
 const uid = () => Math.random().toString(36).slice(2, 9);
 const mkSlots = labels => labels.map(l => ({
   id: uid(),
@@ -827,7 +824,7 @@ function boxScoreText(rec) {
       const pts = p.pts != null ? p.pts : sc ? sc.pts : 0;
       const ours = !p.them && (p.unit !== "defense" || p.score === "td" || p.score === "safety");
       const desc = p.them ? oppName + " " + (sc ? sc.label.toLowerCase() : "score") + (p.yards ? ", " + p.yards + " yd" : "") : who(p.playerId) + (VERB[p.action] ? " " + VERB[p.action] : "") + (p.yards ? " " + p.yards + " yd" : "") + (sc ? " — " + sc.label : "");
-      L.push("Q" + p.quarter + "  " + desc + "  (+" + pts + " " + abbr(ours ? usName : oppName) + ")");
+      L.push("Q" + p.quarter + "  " + desc + "  (+" + pts + " " + (ours ? usName : oppName) + ")");
     });
   }
   const P = rec.players || [];
@@ -1797,7 +1794,7 @@ function GameTab({
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, teamName ? abbr(teamName) : "Us"), /*#__PURE__*/React.createElement("div", {
+  }, teamName || "Us"), /*#__PURE__*/React.createElement("div", {
     className: "score-num"
   }, game.us), /*#__PURE__*/React.createElement("div", {
     className: "score-btns"
@@ -1825,7 +1822,7 @@ function GameTab({
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, oppName ? abbr(oppName) : "Them"), /*#__PURE__*/React.createElement("div", {
+  }, oppName || "Them"), /*#__PURE__*/React.createElement("div", {
     className: "score-num"
   }, game.them), /*#__PURE__*/React.createElement("div", {
     className: "score-btns"
@@ -4937,7 +4934,7 @@ function GameCast({
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, abbr(ourName)), /*#__PURE__*/React.createElement("div", {
+  }, ourName), /*#__PURE__*/React.createElement("div", {
     className: "score-num"
   }, game.us)), /*#__PURE__*/React.createElement("div", {
     className: "dd"
@@ -4949,7 +4946,7 @@ function GameCast({
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, abbr(oppName)), /*#__PURE__*/React.createElement("div", {
+  }, oppName), /*#__PURE__*/React.createElement("div", {
     className: "score-num"
   }, game.them)))), /*#__PURE__*/React.createElement("div", {
     className: "gc-meta"
@@ -4991,7 +4988,7 @@ function GameCast({
     className: "gc-ez opp"
   })), /*#__PURE__*/React.createElement("div", {
     className: "gc-scale"
-  }, /*#__PURE__*/React.createElement("span", null, abbr(ourName)), /*#__PURE__*/React.createElement("span", null, abbr(oppName))), game.spot == null && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, ourName), /*#__PURE__*/React.createElement("span", null, oppName)), game.spot == null && /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       textAlign: "center",
