@@ -490,6 +490,29 @@ const type = (el, val) => {
   click(byText(".nav button", "Game"));
   await flush();
 
+  console.log("\nball spot (optional)");
+  ok("no spot shown while the feature is off", $(".dd-sub").textContent.indexOf("ball on") < 0);
+  click(byText(".chip", "Ball spot"));
+  await flush();
+  const spotSel = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Ball spot");
+  ok("spot sheet opened", !!spotSel);
+  sSetter.call(spotSel, "35");
+  spotSel.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Set the spot"));
+  await flush();
+  ok("ball marked on our 35", $(".dd-sub").textContent.indexOf("ball on Our 35") >= 0);
+  click($$(".pcard").find((c) => c.textContent.indexOf("Eli") >= 0).querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "Ran it"));
+  const spotYds = $(".yardbox select");
+  sSetter.call(spotYds, "10");
+  spotYds.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  ok("a 10-yard run moved the ball to our 45", $(".dd-sub").textContent.indexOf("ball on Our 45") >= 0);
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

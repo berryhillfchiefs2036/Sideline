@@ -251,6 +251,11 @@ const scoresFor = level => SCORES.map(s => s.key === "pat" ? Object.assign({}, s
   pts: level === "highschool" ? 2 : 1
 }) : s);
 const ORD = ["", "1st", "2nd", "3rd", "4th"];
+
+/* Optional ball-spot tracking: 0 = our goal line, 50 = midfield, 100 = their
+   goal line. null = the crew isn't tracking it and nothing shows. */
+const spotLabel = v => v == null ? null : v === 50 ? "the 50" : v < 50 ? "Our " + (v === 0 ? "goal line" : v) : v === 100 ? "Their goal line" : "Their " + (100 - v);
+const clampSpot = v => Math.max(0, Math.min(100, v));
 const UNITS = [{
   key: "offense",
   label: "Offense"
@@ -311,6 +316,7 @@ const BASE = () => ({
   distance: 10,
   unit: "offense",
   stKey: "kickoff",
+  spot: null,
   swaps: {},
   plays: []
 });
@@ -354,6 +360,12 @@ function fold(ops) {
         distance: g.distance,
         quarter: g.quarter
       }));
+      if (g.spot != null) {
+        /* Move the mark with the walk-off, relative to which way the drive
+           is going (defense unit = the other team is driving at our goal). */
+        const dir = g.unit === "defense" ? -1 : 1;
+        g.spot = clampSpot(g.spot + (o.side === "offense" ? -(o.yards || 0) : o.yards || 0) * dir);
+      }
       if (o.side === "defense") {
         g.distance = g.distance - (o.yards || 0);
         if (g.distance <= 0) {
@@ -373,6 +385,11 @@ function fold(ops) {
       distance: g.distance,
       quarter: g.quarter
     }));
+    /* Ball-spot auto-tracking: logged yards always move the mark away from
+       our goal — offensive gains and kicks/returns go forward, offensive
+       losses go back (negative), and defensive plays log the yards the other
+       team lost, which pushes them back from our goal too. */
+    if (g.spot != null) g.spot = clampSpot(g.spot + (o.yards || 0));
     if (pts > 0) {
       const ours = o.unit !== "defense" || o.score === "td" || o.score === "safety";
       if (ours) g.us += pts;else g.them += pts;
@@ -1195,6 +1212,17 @@ function Sideline() {
       assign(sheet.slot, pid);
       setSheet(null);
     }
+  }), sheet && sheet.type === "spot" && /*#__PURE__*/React.createElement(SpotSheet, {
+    spot: game.spot,
+    onClose: () => setSheet(null),
+    onSet: v => {
+      addOp({
+        type: "set",
+        field: "spot",
+        value: v
+      });
+      setSheet(null);
+    }
   }), sheet && sheet.type === "pen" && /*#__PURE__*/React.createElement(PenaltySheet, {
     roster: roster,
     unit: game.unit,
@@ -1297,7 +1325,7 @@ function GameTab({
     className: "dd-main"
   }, ORD[game.down], " ", /*#__PURE__*/React.createElement("small", null, "&"), " ", game.distance), /*#__PURE__*/React.createElement("div", {
     className: "dd-sub"
-  }, "Quarter ", game.quarter, " \xB7 ", game.playCount, " plays run")), /*#__PURE__*/React.createElement("div", {
+  }, "Quarter ", game.quarter, " \xB7 ", game.playCount, " plays run", game.spot != null ? " · ball on " + spotLabel(game.spot) : "")), /*#__PURE__*/React.createElement("div", {
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
@@ -1342,7 +1370,12 @@ function GameTab({
   }, game.distance, " yards to go")), /*#__PURE__*/React.createElement("button", {
     className: "chip",
     onClick: () => set("quarter", game.quarter % 4 + 1)
-  }, "Q", game.quarter))), game.gameInfo && game.gameInfo.opponent && /*#__PURE__*/React.createElement("div", {
+  }, "Q", game.quarter), /*#__PURE__*/React.createElement("button", {
+    className: "chip" + (game.spot != null ? " on" : ""),
+    onClick: () => setSheet({
+      type: "spot"
+    })
+  }, game.spot != null ? "◉ " + spotLabel(game.spot) : "Ball spot"))), game.gameInfo && game.gameInfo.opponent && /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       textAlign: "center",
@@ -1809,6 +1842,55 @@ function SubSheet({
     },
     onClick: () => onPick(null)
   }, "Leave this spot open")));
+}
+function SpotSheet({
+  spot,
+  onSet,
+  onClose
+}) {
+  const [v, setV] = useState(spot != null ? String(spot) : "35");
+  return /*#__PURE__*/React.createElement("div", {
+    className: "veil",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sheet",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sheet-hd"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "sheet-ttl"
+  }, "Ball spot"), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, "Optional \u2014 set it and plays move it for you")), /*#__PURE__*/React.createElement("button", {
+    className: "close",
+    onClick: onClose
+  }, "Cancel")), /*#__PURE__*/React.createElement("div", {
+    className: "empty-note",
+    style: {
+      textAlign: "left",
+      marginBottom: 12
+    }
+  }, "Mark where the ball sits to start the series. Yards gained and lost, kicks, returns, and penalty walk-offs all move the mark automatically \u2014 come back here whenever the refs re-spot it. Coaches who don't want this just never turn it on."), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Ball spot",
+    value: v,
+    onChange: e => setV(e.target.value)
+  }, Array.from({
+    length: 101
+  }, (_, i) => i).map(i => /*#__PURE__*/React.createElement("option", {
+    key: i,
+    value: i
+  }, i === 50 ? "Midfield — the 50" : i < 50 ? "Our " + (i === 0 ? "goal line" : i) : i === 100 ? "Their goal line" : "Their " + (100 - i)))), /*#__PURE__*/React.createElement("button", {
+    className: "confirm",
+    onClick: () => onSet(parseInt(v, 10))
+  }, "Set the spot"), spot != null && /*#__PURE__*/React.createElement("button", {
+    className: "abtn ghost",
+    style: {
+      width: "100%",
+      marginTop: 10
+    },
+    onClick: () => onSet(null)
+  }, "Stop tracking the spot")));
 }
 function PenaltySheet({
   roster,

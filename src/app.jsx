@@ -87,6 +87,14 @@ const scoresFor = (level) => SCORES.map((s) =>
   : s);
 
 const ORD = ["", "1st", "2nd", "3rd", "4th"];
+
+/* Optional ball-spot tracking: 0 = our goal line, 50 = midfield, 100 = their
+   goal line. null = the crew isn't tracking it and nothing shows. */
+const spotLabel = (v) => (v == null ? null
+  : v === 50 ? "the 50"
+  : v < 50 ? "Our " + (v === 0 ? "goal line" : v)
+  : v === 100 ? "Their goal line" : "Their " + (100 - v));
+const clampSpot = (v) => Math.max(0, Math.min(100, v));
 const UNITS = [
   { key: "offense", label: "Offense" },
   { key: "defense", label: "Defense" },
@@ -106,7 +114,7 @@ const freshLineups = () => ({
 });
 const freshSquad = () => ({ roster: [], lineups: freshLineups(), minPlays: 8, schedule: [], scoring: "elementary", rev: 0 });
 const BASE = () => ({ quarter: 1, us: 0, them: 0, down: 1, distance: 10, unit: "offense",
-  stKey: "kickoff", swaps: {}, plays: [] });
+  stKey: "kickoff", spot: null, swaps: {}, plays: [] });
 
 /* ============================ GAME FOLD ============================ */
 
@@ -136,6 +144,12 @@ function fold(ops) {
          automatic first down when the yardage covers the distance. Manual
          down/distance taps still override, as always. */
       g.plays.push(Object.assign({}, o, { down: g.down, distance: g.distance, quarter: g.quarter }));
+      if (g.spot != null) {
+        /* Move the mark with the walk-off, relative to which way the drive
+           is going (defense unit = the other team is driving at our goal). */
+        const dir = g.unit === "defense" ? -1 : 1;
+        g.spot = clampSpot(g.spot + (o.side === "offense" ? -(o.yards || 0) : o.yards || 0) * dir);
+      }
       if (o.side === "defense") {
         g.distance = g.distance - (o.yards || 0);
         if (g.distance <= 0) { g.down = 1; g.distance = 10; }
@@ -149,6 +163,11 @@ function fold(ops) {
     const sc = SCORES.find((x) => x.key === o.score);
     const pts = o.pts != null ? o.pts : sc ? sc.pts : 0;
     g.plays.push(Object.assign({}, o, { down: g.down, distance: g.distance, quarter: g.quarter }));
+    /* Ball-spot auto-tracking: logged yards always move the mark away from
+       our goal — offensive gains and kicks/returns go forward, offensive
+       losses go back (negative), and defensive plays log the yards the other
+       team lost, which pushes them back from our goal too. */
+    if (g.spot != null) g.spot = clampSpot(g.spot + (o.yards || 0));
     if (pts > 0) {
       const ours = o.unit !== "defense" || o.score === "td" || o.score === "safety";
       if (ours) g.us += pts; else g.them += pts;
@@ -639,6 +658,9 @@ function Sideline() {
         <SubSheet slot={sheet.slot} roster={roster} byId={byId} onField={onField} statOf={statOf}
           minPlays={minPlays} onClose={() => setSheet(null)}
           onPick={(pid) => { assign(sheet.slot, pid); setSheet(null); }} />)}
+      {sheet && sheet.type === "spot" && (
+        <SpotSheet spot={game.spot} onClose={() => setSheet(null)}
+          onSet={(v) => { addOp({ type: "set", field: "spot", value: v }); setSheet(null); }} />)}
       {sheet && sheet.type === "pen" && (
         <PenaltySheet roster={roster} unit={game.unit} onClose={() => setSheet(null)}
           onLog={(pen) => { addOp(Object.assign({ type: "pen" }, pen)); setSheet(null); }} />)}
@@ -687,7 +709,8 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
           </div>
           <div className="dd">
             <div className="dd-main">{ORD[game.down]} <small>&amp;</small> {game.distance}</div>
-            <div className="dd-sub">Quarter {game.quarter} · {game.playCount} plays run</div>
+            <div className="dd-sub">Quarter {game.quarter} · {game.playCount} plays run
+              {game.spot != null ? " · ball on " + spotLabel(game.spot) : ""}</div>
           </div>
           <div className="score-blk">
             <div className="eyebrow">Them</div>
@@ -712,6 +735,8 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
             {game.distance > 100 && <option value={game.distance}>{game.distance} yards to go</option>}
           </select>
           <button className="chip" onClick={() => set("quarter", (game.quarter % 4) + 1)}>Q{game.quarter}</button>
+          <button className={"chip" + (game.spot != null ? " on" : "")} onClick={() => setSheet({ type: "spot" })}>
+            {game.spot != null ? "◉ " + spotLabel(game.spot) : "Ball spot"}</button>
         </div>
       </div>
 
@@ -1013,6 +1038,40 @@ function SubSheet({ slot, roster, byId, onField, statOf, minPlays, onClose, onPi
         {current && (
           <button className="abtn ghost" style={{ width: "100%", marginTop: 12 }} onClick={() => onPick(null)}>
             Leave this spot open</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SpotSheet({ spot, onSet, onClose }) {
+  const [v, setV] = useState(spot != null ? String(spot) : "35");
+  return (
+    <div className="veil" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-hd">
+          <div>
+            <div className="sheet-ttl">Ball spot</div>
+            <div className="eyebrow">Optional — set it and plays move it for you</div>
+          </div>
+          <button className="close" onClick={onClose}>Cancel</button>
+        </div>
+        <div className="empty-note" style={{ textAlign: "left", marginBottom: 12 }}>
+          Mark where the ball sits to start the series. Yards gained and lost, kicks, returns,
+          and penalty walk-offs all move the mark automatically — come back here whenever the
+          refs re-spot it. Coaches who don't want this just never turn it on.
+        </div>
+        <select className="inp" aria-label="Ball spot" value={v} onChange={(e) => setV(e.target.value)}>
+          {Array.from({ length: 101 }, (_, i) => i).map((i) => (
+            <option key={i} value={i}>{i === 50 ? "Midfield — the 50"
+              : i < 50 ? "Our " + (i === 0 ? "goal line" : i)
+              : i === 100 ? "Their goal line" : "Their " + (100 - i)}</option>
+          ))}
+        </select>
+        <button className="confirm" onClick={() => onSet(parseInt(v, 10))}>Set the spot</button>
+        {spot != null && (
+          <button className="abtn ghost" style={{ width: "100%", marginTop: 10 }} onClick={() => onSet(null)}>
+            Stop tracking the spot</button>
         )}
       </div>
     </div>
