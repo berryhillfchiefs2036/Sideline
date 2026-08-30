@@ -1123,8 +1123,8 @@ const type = (el, val) => {
   await flush();
   ok("scrimmage stays out of the record", $(".dd-main").textContent === "1–1–1");
   const psRow = byText(".row", "Practice Squad");
-  ok("final scheduled games stop offering Add stats",
-    !!psRow && !Array.from(psRow.querySelectorAll(".mini")).some((b) => b.textContent === "Add stats"));
+  ok("finished scheduled games still offer Add stats",
+    !!psRow && Array.from(psRow.querySelectorAll(".mini")).some((b) => b.textContent === "Add stats"));
   ok("scrimmage game listed and tagged", $$(".row").some((r) => r.querySelector(".plate") &&
     r.querySelector(".plate").textContent === "6–0" && r.textContent.indexOf("scrimmage") >= 0));
 
@@ -1173,6 +1173,26 @@ const type = (el, val) => {
   click(inSheet(".close", "Done"));
   await flush();
   ok("game stats sheet closes", !$(".sheet"));
+  click(byText(".nav button", "Game"));
+  await flush();
+
+  console.log("\nreopen an older game from its archive");
+  click(byText(".abtn", "End game"));
+  await flush();
+  click(byText(".nav button", "Season"));
+  await flush();
+  const oldRow = byText(".row", "7–0");
+  ok("older games offer Reopen once the board is clear", !!oldRow &&
+    !!Array.from(oldRow.querySelectorAll(".mini")).find((b) => b.textContent === "Reopen"));
+  click(Array.from(oldRow.querySelectorAll(".mini")).find((b) => b.textContent === "Reopen"));
+  await flush();
+  ok("old game rebuilt on the board", $(".dd-sub").textContent.indexOf("3 plays") >= 0);
+  ok("old game's edited score restored", $$(".score-num")[0].textContent === "7");
+  ok("old game's plays came back editable", $$(".logline").length === 3 &&
+    !!$(".logline [aria-label='Edit this play']"));
+  click(byText(".nav button", "Season"));
+  await flush();
+  ok("reopened old game left the season list", !byText(".row", "7–0"));
   click(byText(".nav button", "Game"));
   await flush();
 

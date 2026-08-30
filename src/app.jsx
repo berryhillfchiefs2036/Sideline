@@ -808,7 +808,7 @@ function Sideline() {
       : new Date().toISOString();
     S.archiveGame({ id: uid(), endedAt, opponent: opponent || "",
       us: game.us, them: game.them, playsCount: game.playCount, plays: game.plays, players,
-      scrim: !!(game.gameInfo || {}).scrim });
+      scrim: !!(game.gameInfo || {}).scrim, schedId: (game.gameInfo || {}).schedId || null });
     /* If this board was tracking a scheduled game, stamp that schedule entry
        as completed with the final score. */
     const schedId = (game.gameInfo || {}).schedId;
@@ -871,16 +871,39 @@ function Sideline() {
     setMovingPlay(null);
   };
 
-  /* The most recently ended game can be reopened — but only until the next
-     game's first play, so two games' plays can never merge. */
+  /* Any saved game can be reopened onto an empty board for full editing.
+     The most recently ended one comes back by undoing its End (original ops,
+     original authors); older games are rebuilt from the archive's stored
+     play-by-play, re-timestamped to now so the replay picks them up. */
+  const boardEmpty = game.playCount === 0 && game.plays.length === 0;
   const newestArchived = S.games.length
     ? S.games.slice().sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1))[0] : null;
-  const reopenableId = game.playCount === 0 && game.plays.length === 0 && game.lastResetId && newestArchived
-    ? newestArchived.id : null;
+  const reopenableId = boardEmpty && game.lastResetId && newestArchived ? newestArchived.id : null;
   const reopenGame = (rec) => {
-    if (!reopenableId || rec.id !== reopenableId) return;
-    if (!window.confirm("Reopen this game on the board? Every play comes back, fully editable, and it leaves the Season list until you end the game again.")) return;
-    addOp({ type: "undo", targets: [game.lastResetId] });
+    if (!boardEmpty) {
+      window.alert("There's already a game on the board — end it first, then any saved game can be reopened.");
+      return;
+    }
+    if (!window.confirm("Put this game back on the board? Every play comes back, fully editable, and it leaves the Season list until you end the game again.")) return;
+    if (reopenableId && rec.id === reopenableId) {
+      addOp({ type: "undo", targets: [game.lastResetId] });
+    } else {
+      const base = Date.now();
+      const list = rec.plays || [];
+      list.forEach((p, i) => {
+        const op = Object.assign({}, p);
+        delete op.id; delete op.by; delete op.byName;
+        addOp(Object.assign(op, { ts: base + i }));
+      });
+      /* Restore the tag and the final score exactly as archived — manual
+         score corrections in the record survive the rebuild. */
+      const after = base + list.length + 500;
+      addOp({ type: "set", field: "gameInfo", ts: after,
+        value: { opponent: rec.opponent || "", date: (rec.endedAt || "").slice(0, 10),
+          schedId: rec.schedId || null, scrim: !!rec.scrim } });
+      addOp({ type: "set", field: "us", value: rec.us || 0, ts: after + 1 });
+      addOp({ type: "set", field: "them", value: rec.them || 0, ts: after + 2 });
+    }
     S.removeGame(rec.id);
     setTab("game");
   };
@@ -926,7 +949,7 @@ function Sideline() {
         {tab === "stats" && <StatsTab {...{ roster, statOf, minPlays, game, teamName }} onEndGame={endGame} />}
         {tab === "season" && <SeasonTab games={S.games} squad={squad} setSquad={setSquad} teamName={teamName}
           onEdit={S.editGame} onRemove={S.removeGame} onImport={S.importGames} onTrack={trackScheduled}
-          reopenableId={reopenableId} onReopen={reopenGame} live={liveRec} />}
+          canReopen={boardEmpty} onReopen={reopenGame} live={liveRec} />}
       </div>
 
       {sheet && sheet.type === "play" && (
@@ -2578,7 +2601,7 @@ function StatsTab({ roster, statOf, minPlays, game, teamName, onEndGame }) {
 
 /* ============================ SEASON ============================ */
 
-function ScheduleSection({ squad, setSquad, onTrack }) {
+function ScheduleSection({ squad, setSquad, onTrack, onTrackDone }) {
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [opp, setOpp] = useState("");
@@ -2638,7 +2661,8 @@ function ScheduleSection({ squad, setSquad, onTrack }) {
                 {g.scrim ? " · scrimmage" : ""}
                 {g.done ? " · final " + g.us + "–" + g.them : past ? " · played" : ""}</div>
             </div>
-            {!g.done && <button className="mini dark" onClick={() => onTrack(g)}>Add stats</button>}
+            <button className="mini dark"
+              onClick={() => (g.done && onTrackDone ? onTrackDone(g) : onTrack(g))}>Add stats</button>
             <button className="mini" onClick={() => {
               if (window.confirm("Take this game off the schedule?")) remove(g.id);
             }}>Remove</button>
@@ -2815,7 +2839,7 @@ function GameStatsSheet({ rec, teamName, onClose }) {
   );
 }
 
-function SeasonTab({ games, squad, setSquad, teamName, onEdit, onRemove, onImport, onTrack, reopenableId, onReopen, live }) {
+function SeasonTab({ games, squad, setSquad, teamName, onEdit, onRemove, onImport, onTrack, canReopen, onReopen, live }) {
   const [year, setYear] = useState("all");
   const [view, setView] = useState("plays");
   const [editingGame, setEditingGame] = useState(null);
@@ -2914,7 +2938,16 @@ function SeasonTab({ games, squad, setSquad, teamName, onEdit, onRemove, onImpor
           onChange={(e) => setSquad((s) => Object.assign({}, s, { teamName: e.target.value }))} />
       </div>
 
-      <ScheduleSection squad={squad} setSquad={setSquad} onTrack={onTrack} />
+      <ScheduleSection squad={squad} setSquad={setSquad} onTrack={onTrack}
+        onTrackDone={(g) => {
+          /* "Add stats" on a finished game means editing THAT game — reopen
+             its archive instead of tagging a fresh board with its name. */
+          const byNew = games.slice().sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1));
+          const rec = byNew.find((x) => x.schedId === g.id)
+            || byNew.find((x) => (x.opponent || "") === g.opponent);
+          if (rec) onReopen(rec);
+          else onTrack(g);
+        }} />
 
       {years.length > 1 && (
         <div className="stbar">
@@ -3044,7 +3077,7 @@ function SeasonTab({ games, squad, setSquad, teamName, onEdit, onRemove, onImpor
                   {g.scrim ? " · scrimmage" : ""}{g.pending ? " · waiting to upload" : ""}
                 </div>
               </div>
-              {g.id === reopenableId && (
+              {canReopen && (
                 <button className="mini dark" onClick={() => onReopen(g)}>Reopen</button>
               )}
               <button className="mini" onClick={() => setStatsGame(g)}>Stats</button>
