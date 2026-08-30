@@ -874,18 +874,25 @@ function Chain({ count, min }) {
 }
 
 function PlayLog({ game, byId, addOp, onEdit }) {
-  const recent = game.plays.slice(-14).reverse();
-  if (!recent.length) return null;
+  const [showAll, setShowAll] = useState(false);
+  const all = game.plays.slice().reverse();
+  const recent = showAll ? all : all.slice(0, 14);
+  if (!all.length) return null;
   return (
     <React.Fragment>
-      <div className="sechd"><div className="h2">Play log</div><div className="eyebrow">Latest first</div></div>
+      <div className="sechd"><div className="h2">Play log</div>
+        <div className="eyebrow">{showAll ? all.length + " this game · latest first" : "Latest first"}</div></div>
       <div>
-        {recent.map((p) => {
+        {recent.map((p, i) => {
+          const qBreak = i > 0 && recent[i - 1].quarter !== p.quarter
+            ? <div className="eyebrow" style={{ margin: "10px 0 4px" }}>Quarter {p.quarter}</div> : null;
           const pl = byId[p.playerId];
           if (p.type === "pen") {
             const pk = PENALTIES.find((x) => x.key === p.kind);
             return (
-              <div className="logline" key={p.id}>
+              <React.Fragment key={p.id}>
+              {qBreak}
+              <div className="logline">
                 <span className="eyebrow">{ORD[p.down]} &amp; {p.distance}</span>
                 <span>
                   <b style={{ color: "var(--stop)" }}>Flag</b>{" "}
@@ -902,11 +909,14 @@ function PlayLog({ game, byId, addOp, onEdit }) {
                     }
                   }}>✕</button>
               </div>
+              </React.Fragment>
             );
           }
           const sc = SCORES.find((x) => x.key === p.score);
           return (
-            <div className="logline" key={p.id}>
+            <React.Fragment key={p.id}>
+            {qBreak}
+            <div className="logline">
               <span className="eyebrow">{ORD[p.down]} &amp; {p.distance}</span>
               <span>
                 {pl ? <b>#{pl.num} {pl.name}</b> : <b>{p.them ? "Their team" : "Whole unit"}</b>}{" "}
@@ -927,9 +937,15 @@ function PlayLog({ game, byId, addOp, onEdit }) {
                   }
                 }}>✕</button>
             </div>
+            </React.Fragment>
           );
         })}
       </div>
+      {all.length > 14 && (
+        <button className="mini" style={{ width: "100%", padding: 10, marginTop: 8 }}
+          onClick={() => setShowAll(!showAll)}>
+          {showAll ? "Show recent plays only" : "Show all " + all.length + " plays"}</button>
+      )}
     </React.Fragment>
   );
 }

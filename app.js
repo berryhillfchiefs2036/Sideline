@@ -1598,21 +1598,30 @@ function PlayLog({
   addOp,
   onEdit
 }) {
-  const recent = game.plays.slice(-14).reverse();
-  if (!recent.length) return null;
+  const [showAll, setShowAll] = useState(false);
+  const all = game.plays.slice().reverse();
+  const recent = showAll ? all : all.slice(0, 14);
+  if (!all.length) return null;
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "sechd"
   }, /*#__PURE__*/React.createElement("div", {
     className: "h2"
   }, "Play log"), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, "Latest first")), /*#__PURE__*/React.createElement("div", null, recent.map(p => {
+  }, showAll ? all.length + " this game · latest first" : "Latest first")), /*#__PURE__*/React.createElement("div", null, recent.map((p, i) => {
+    const qBreak = i > 0 && recent[i - 1].quarter !== p.quarter ? /*#__PURE__*/React.createElement("div", {
+      className: "eyebrow",
+      style: {
+        margin: "10px 0 4px"
+      }
+    }, "Quarter ", p.quarter) : null;
     const pl = byId[p.playerId];
     if (p.type === "pen") {
       const pk = PENALTIES.find(x => x.key === p.kind);
-      return /*#__PURE__*/React.createElement("div", {
-        className: "logline",
+      return /*#__PURE__*/React.createElement(React.Fragment, {
         key: p.id
+      }, qBreak, /*#__PURE__*/React.createElement("div", {
+        className: "logline"
       }, /*#__PURE__*/React.createElement("span", {
         className: "eyebrow"
       }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("b", {
@@ -1644,12 +1653,13 @@ function PlayLog({
             });
           }
         }
-      }, "\u2715"));
+      }, "\u2715")));
     }
     const sc = SCORES.find(x => x.key === p.score);
-    return /*#__PURE__*/React.createElement("div", {
-      className: "logline",
+    return /*#__PURE__*/React.createElement(React.Fragment, {
       key: p.id
+    }, qBreak, /*#__PURE__*/React.createElement("div", {
+      className: "logline"
     }, /*#__PURE__*/React.createElement("span", {
       className: "eyebrow"
     }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : /*#__PURE__*/React.createElement("b", null, p.them ? "Their team" : "Whole unit"), " ", p.them && p.yards ? p.yards + " yd " : "", VERB[p.action] || "", " ", ["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : "", ["sack", "tfl"].indexOf(p.action) >= 0 && p.yards ? "−" + p.yards + " yd" : "", p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : "", sc && /*#__PURE__*/React.createElement("span", {
@@ -1682,8 +1692,16 @@ function PlayLog({
           });
         }
       }
-    }, "\u2715"));
-  })));
+    }, "\u2715")));
+  })), all.length > 14 && /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    style: {
+      width: "100%",
+      padding: 10,
+      marginTop: 8
+    },
+    onClick: () => setShowAll(!showAll)
+  }, showAll ? "Show recent plays only" : "Show all " + all.length + " plays"));
 }
 
 /* ============================ SHEETS ============================ */

@@ -666,6 +666,18 @@ const type = (el, val) => {
   click(byText(".nav button", "Game"));
   await flush();
 
+  console.log("\nfull play history");
+  const cappedCount = $$(".logline").length;
+  ok("log is capped by default", cappedCount === 14);
+  click(byText(".mini", "Show all"));
+  await flush();
+  const fullCount = $$(".logline").length;
+  ok("show-all reveals the whole game", fullCount > cappedCount);
+  ok("earliest plays are visible when expanded", !!byText(".logline", "caught"));
+  click(byText(".mini", "Show recent"));
+  await flush();
+  ok("log collapses back to recent plays", $$(".logline").length === 14);
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);
