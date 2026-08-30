@@ -848,6 +848,26 @@ const type = (el, val) => {
   await flush();
   ok("play moved to its new spot in the order", $$(".logline")[0].textContent.indexOf("Nico") >= 0);
 
+  console.log("\ngamecast watch mode");
+  const dom2 = new JSDOM(html, { runScripts: "outside-only", pretendToBeVisual: true,
+    url: "https://example.test/?watch=abcd" });
+  const w2 = dom2.window;
+  Object.defineProperty(w2, "localStorage", {
+    value: { getItem: () => null, setItem: () => {}, removeItem: () => {} } });
+  w2.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {} });
+  w2.eval(fs.readFileSync(path.join(root, "config.js"), "utf8"));
+  w2.eval(fs.readFileSync(path.join(root, "vendor/react.production.min.js"), "utf8"));
+  w2.eval(fs.readFileSync(path.join(root, "vendor/react-dom.production.min.js"), "utf8"));
+  w2.eval(fs.readFileSync(path.join(root, "vendor/supabase.min.js"), "utf8"));
+  w2.eval(fs.readFileSync(path.join(root, "app.js"), "utf8"));
+  await flush();
+  ok("watch mode boots the gamecast", w2.document.body.textContent.indexOf("Watching ABCD") >= 0);
+  ok("gamecast shows the scoreboard", !!w2.document.querySelector(".board"));
+  ok("gamecast has no coaching controls",
+    w2.document.querySelectorAll(".abtn").length === 0 &&
+    w2.document.querySelectorAll(".nav").length === 0 &&
+    w2.document.querySelectorAll(".tick").length === 0);
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

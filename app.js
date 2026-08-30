@@ -3140,7 +3140,34 @@ function CrewSheet({
       color: "var(--soft)",
       lineHeight: 1.5
     }
-  }, "Send the other coaches this page's link and these four letters. Everyone who types it in shares one roster, one score, one play log.")), sync.state === "offline" && /*#__PURE__*/React.createElement("div", {
+  }, "Send the other coaches this page's link and these four letters. Everyone who types it in shares one roster, one score, one play log.")), /*#__PURE__*/React.createElement("div", {
+    className: "yardbox",
+    style: {
+      textAlign: "center",
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, "Fans can watch"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: "var(--soft)",
+      lineHeight: 1.5,
+      marginBottom: 8
+    }
+  }, "Share the watch link for a live, view-only gamecast \u2014 score, down & distance, and the play-by-play as it happens. No editing."), /*#__PURE__*/React.createElement("button", {
+    className: "mini dark",
+    style: {
+      width: "100%",
+      padding: 10
+    },
+    onClick: () => {
+      const link = window.location.origin + window.location.pathname + "?watch=" + code;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(() => window.alert("Watch link copied:\n" + link), () => window.prompt("Copy the watch link:", link));
+      } else window.prompt("Copy the watch link:", link);
+    }
+  }, "Copy the watch link")), sync.state === "offline" && /*#__PURE__*/React.createElement("div", {
     className: "banner",
     style: {
       marginTop: 10
@@ -3222,7 +3249,17 @@ function CrewSheet({
     className: "confirm alt",
     disabled: !ready || !available,
     onClick: () => onJoin(entry, name)
-  }, "Join this game"), /*#__PURE__*/React.createElement("div", {
+  }, "Join this game"), /*#__PURE__*/React.createElement("button", {
+    className: "abtn ghost",
+    style: {
+      width: "100%",
+      marginTop: 10
+    },
+    disabled: !ready || !available,
+    onClick: () => {
+      window.location.href = window.location.pathname + "?watch=" + entry.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    }
+  }, "Just watch this game (view only)"), /*#__PURE__*/React.createElement("div", {
     className: "empty-note",
     style: {
       textAlign: "left",
@@ -4351,9 +4388,185 @@ function SeasonTab({
   }, /*#__PURE__*/React.createElement("b", null, "Back up"), " downloads every saved game as one file \u2014 do it now and then, or before switching phones.", /*#__PURE__*/React.createElement("b", null, " Restore"), " merges a backup in without overwriting anything, so it also works for combining years."));
 }
 
+/* ============================ GAMECAST (VIEW ONLY) ============================ */
+
+/* Fans follow along at ?watch=CODE — live score, downs, and play-by-play,
+   with no controls to change anything. */
+function GameCast({
+  code
+}) {
+  const [ops, setOps] = useState([]);
+  const [squad, setSquadState] = useState(() => freshSquad());
+  const [status, setStatus] = useState(sb ? "connecting" : "noconfig");
+  useEffect(() => {
+    if (!sb) return undefined;
+    let alive = true;
+    const pull = async () => {
+      try {
+        const rows = await sb.from(T_OPS).select("coach_id,coach_name,ops").eq("game_code", code);
+        if (rows.error) throw rows.error;
+        const out = [];
+        (rows.data || []).forEach(r => (r.ops || []).forEach(o => out.push(Object.assign({}, o, {
+          byName: r.coach_name || "Coach"
+        }))));
+        out.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
+        if (!alive) return;
+        setOps(out);
+        setStatus("live");
+        const sq = await sb.from(T_SQUAD).select("squad").eq("game_code", code).maybeSingle();
+        if (alive && !sq.error && sq.data && sq.data.squad) setSquadState(sq.data.squad);
+      } catch (e) {
+        if (alive) setStatus("offline");
+      }
+    };
+    pull();
+    let ch = null;
+    try {
+      ch = sb.channel("sideline-watch-" + code).on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: T_OPS,
+        filter: "game_code=eq." + code
+      }, () => {
+        if (alive) pull();
+      }).subscribe();
+    } catch (e) {/* realtime unavailable — the poll below still updates */}
+    const t = setInterval(() => {
+      if (!document.hidden) pull();
+    }, 10000);
+    const onShow = () => {
+      if (!document.hidden) pull();
+    };
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      alive = false;
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onShow);
+      if (ch) try {
+        sb.removeChannel(ch);
+      } catch (e) {/* noop */}
+    };
+  }, [code]);
+  const game = useMemo(() => fold(ops), [ops]);
+  const byId = useMemo(() => {
+    const m = {};
+    (squad.roster || []).forEach(p => {
+      m[p.id] = p;
+    });
+    return m;
+  }, [squad]);
+  const statusText = status === "noconfig" ? "needs setup" : status === "offline" ? "reconnecting…" : status === "connecting" ? "connecting…" : "live";
+  return /*#__PURE__*/React.createElement("div", {
+    className: "sl"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sl-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "crew",
+    style: {
+      cursor: "default"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "dot " + (status === "live" ? "live" : "err")
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      fontWeight: 600
+    }
+  }, "Watching ", code), /*#__PURE__*/React.createElement("span", {
+    className: "eyebrow",
+    style: {
+      marginLeft: "auto"
+    }
+  }, "Gamecast \xB7 ", statusText)), /*#__PURE__*/React.createElement("div", {
+    className: "board"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "board-top"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, "Us"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num"
+  }, game.us)), /*#__PURE__*/React.createElement("div", {
+    className: "dd"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "dd-main"
+  }, ORD[game.down], " ", /*#__PURE__*/React.createElement("small", null, "&"), " ", game.distance), /*#__PURE__*/React.createElement("div", {
+    className: "dd-sub"
+  }, "Quarter ", game.quarter, " \xB7 ", game.playCount, " plays run", game.spot != null ? " · ball on " + spotLabel(game.spot) : "")), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, "Them"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num"
+  }, game.them)))), game.gameInfo && game.gameInfo.opponent && /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      textAlign: "center",
+      marginTop: 8
+    }
+  }, "vs ", game.gameInfo.opponent), /*#__PURE__*/React.createElement("div", {
+    className: "sechd"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h2"
+  }, "Play-by-play"), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, "Latest first")), game.plays.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "empty-note"
+  }, "No plays yet \u2014 hang tight, kickoff is coming."), /*#__PURE__*/React.createElement("div", null, game.plays.slice().reverse().map((p, i, arr) => {
+    const qBreak = i > 0 && arr[i - 1].quarter !== p.quarter;
+    const pl = byId[p.playerId];
+    let body;
+    if (p.type === "pen") {
+      const pk = PENALTIES.find(x => x.key === p.kind);
+      body = /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("b", {
+        style: {
+          color: "var(--stop)"
+        }
+      }, "Flag"), " ", pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : p.ours ? "on us" : "on them", " — ", pk ? pk.label : "penalty", ", ", p.yards, " yd");
+    } else {
+      const sc = SCORES.find(x => x.key === p.score);
+      body = /*#__PURE__*/React.createElement("span", null, pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : /*#__PURE__*/React.createElement("b", null, p.them ? "Their team" : "Whole unit"), " ", p.them && p.yards ? p.yards + " yd " : "", VERB[p.action] || "", " ", ["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : "", ["sack", "tfl"].indexOf(p.action) >= 0 && p.yards ? "−" + p.yards + " yd" : "", p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : "", p.assistIds && p.assistIds.length ? " · assist " + p.assistIds.map(id => byId[id] ? "#" + byId[id].num : "").join(", ") : "", sc && /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: "var(--stop)",
+          fontWeight: 700
+        }
+      }, " \xB7 ", sc.label));
+    }
+    return /*#__PURE__*/React.createElement(React.Fragment, {
+      key: p.id || i
+    }, qBreak && /*#__PURE__*/React.createElement("div", {
+      className: "eyebrow",
+      style: {
+        margin: "10px 0 4px"
+      }
+    }, "Quarter ", p.quarter), /*#__PURE__*/React.createElement("div", {
+      className: "logline"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "eyebrow"
+    }, ORD[p.down], " & ", p.distance), body));
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "empty-note",
+    style: {
+      textAlign: "left",
+      marginTop: 14
+    }
+  }, "View only \u2014 you're following along live. Scores and plays appear here seconds after the coaches log them.")));
+}
+
 /* ============================ MOUNT ============================ */
 
-ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElement(Sideline, null));
+const WATCH_CODE = (() => {
+  try {
+    const m = (window.location.search || "").match(/[?&]watch=([A-Za-z0-9]{4})/);
+    return m ? m[1].toUpperCase() : null;
+  } catch (e) {
+    return null;
+  }
+})();
+ReactDOM.createRoot(document.getElementById("root")).render(WATCH_CODE ? /*#__PURE__*/React.createElement(GameCast, {
+  code: WATCH_CODE
+}) : /*#__PURE__*/React.createElement(Sideline, null));
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch(() => {});

@@ -1835,6 +1835,21 @@ function CrewSheet({ me, code, sync, available, onJoin, onLeave, onRename, onClo
                 one score, one play log.
               </div>
             </div>
+            <div className="yardbox" style={{ textAlign: "center", marginTop: 10 }}>
+              <div className="eyebrow">Fans can watch</div>
+              <div style={{ fontSize: 13, color: "var(--soft)", lineHeight: 1.5, marginBottom: 8 }}>
+                Share the watch link for a live, view-only gamecast — score, down &amp; distance, and
+                the play-by-play as it happens. No editing.
+              </div>
+              <button className="mini dark" style={{ width: "100%", padding: 10 }} onClick={() => {
+                const link = window.location.origin + window.location.pathname + "?watch=" + code;
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(link).then(
+                    () => window.alert("Watch link copied:\n" + link),
+                    () => window.prompt("Copy the watch link:", link));
+                } else window.prompt("Copy the watch link:", link);
+              }}>Copy the watch link</button>
+            </div>
             {sync.state === "offline" && (
               <div className="banner" style={{ marginTop: 10 }}>
                 <b>No connection.</b>
@@ -1869,6 +1884,10 @@ function CrewSheet({ me, code, sync, available, onJoin, onLeave, onRename, onClo
               onChange={(e) => setEntry(e.target.value.toUpperCase())} />
             <button className="confirm alt" disabled={!ready || !available} onClick={() => onJoin(entry, name)}>
               Join this game</button>
+            <button className="abtn ghost" style={{ width: "100%", marginTop: 10 }} disabled={!ready || !available}
+              onClick={() => { window.location.href = window.location.pathname + "?watch=" +
+                entry.replace(/[^A-Za-z0-9]/g, "").toUpperCase(); }}>
+              Just watch this game (view only)</button>
             <div className="empty-note" style={{ textAlign: "left", marginTop: 14 }}>
               Your solo roster stays on this phone and comes back if you leave the crew.
             </div>
@@ -2552,9 +2571,158 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
   );
 }
 
+/* ============================ GAMECAST (VIEW ONLY) ============================ */
+
+/* Fans follow along at ?watch=CODE — live score, downs, and play-by-play,
+   with no controls to change anything. */
+function GameCast({ code }) {
+  const [ops, setOps] = useState([]);
+  const [squad, setSquadState] = useState(() => freshSquad());
+  const [status, setStatus] = useState(sb ? "connecting" : "noconfig");
+
+  useEffect(() => {
+    if (!sb) return undefined;
+    let alive = true;
+    const pull = async () => {
+      try {
+        const rows = await sb.from(T_OPS).select("coach_id,coach_name,ops").eq("game_code", code);
+        if (rows.error) throw rows.error;
+        const out = [];
+        (rows.data || []).forEach((r) => (r.ops || []).forEach((o) =>
+          out.push(Object.assign({}, o, { byName: r.coach_name || "Coach" }))));
+        out.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
+        if (!alive) return;
+        setOps(out);
+        setStatus("live");
+        const sq = await sb.from(T_SQUAD).select("squad").eq("game_code", code).maybeSingle();
+        if (alive && !sq.error && sq.data && sq.data.squad) setSquadState(sq.data.squad);
+      } catch (e) { if (alive) setStatus("offline"); }
+    };
+    pull();
+    let ch = null;
+    try {
+      ch = sb.channel("sideline-watch-" + code)
+        .on("postgres_changes", { event: "*", schema: "public", table: T_OPS, filter: "game_code=eq." + code },
+          () => { if (alive) pull(); })
+        .subscribe();
+    } catch (e) { /* realtime unavailable — the poll below still updates */ }
+    const t = setInterval(() => { if (!document.hidden) pull(); }, 10000);
+    const onShow = () => { if (!document.hidden) pull(); };
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      alive = false; clearInterval(t);
+      document.removeEventListener("visibilitychange", onShow);
+      if (ch) try { sb.removeChannel(ch); } catch (e) { /* noop */ }
+    };
+  }, [code]);
+
+  const game = useMemo(() => fold(ops), [ops]);
+  const byId = useMemo(() => {
+    const m = {}; (squad.roster || []).forEach((p) => { m[p.id] = p; }); return m;
+  }, [squad]);
+  const statusText = status === "noconfig" ? "needs setup"
+    : status === "offline" ? "reconnecting…"
+    : status === "connecting" ? "connecting…" : "live";
+
+  return (
+    <div className="sl">
+      <div className="sl-in">
+        <div className="crew" style={{ cursor: "default" }}>
+          <span className={"dot " + (status === "live" ? "live" : "err")} />
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Watching {code}</span>
+          <span className="eyebrow" style={{ marginLeft: "auto" }}>Gamecast · {statusText}</span>
+        </div>
+
+        <div className="board">
+          <div className="board-top">
+            <div className="score-blk">
+              <div className="eyebrow">Us</div>
+              <div className="score-num">{game.us}</div>
+            </div>
+            <div className="dd">
+              <div className="dd-main">{ORD[game.down]} <small>&amp;</small> {game.distance}</div>
+              <div className="dd-sub">Quarter {game.quarter} · {game.playCount} plays run
+                {game.spot != null ? " · ball on " + spotLabel(game.spot) : ""}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow">Them</div>
+              <div className="score-num">{game.them}</div>
+            </div>
+          </div>
+        </div>
+
+        {game.gameInfo && game.gameInfo.opponent && (
+          <div className="eyebrow" style={{ textAlign: "center", marginTop: 8 }}>
+            vs {game.gameInfo.opponent}
+          </div>
+        )}
+
+        <div className="sechd"><div className="h2">Play-by-play</div>
+          <div className="eyebrow">Latest first</div></div>
+        {game.plays.length === 0 && (
+          <div className="empty-note">No plays yet — hang tight, kickoff is coming.</div>
+        )}
+        <div>
+          {game.plays.slice().reverse().map((p, i, arr) => {
+            const qBreak = i > 0 && arr[i - 1].quarter !== p.quarter;
+            const pl = byId[p.playerId];
+            let body;
+            if (p.type === "pen") {
+              const pk = PENALTIES.find((x) => x.key === p.kind);
+              body = (
+                <span>
+                  <b style={{ color: "var(--stop)" }}>Flag</b>{" "}
+                  {pl ? <b>#{pl.num} {pl.name}</b> : p.ours ? "on us" : "on them"}
+                  {" — "}{pk ? pk.label : "penalty"}, {p.yards} yd
+                </span>
+              );
+            } else {
+              const sc = SCORES.find((x) => x.key === p.score);
+              body = (
+                <span>
+                  {pl ? <b>#{pl.num} {pl.name}</b> : <b>{p.them ? "Their team" : "Whole unit"}</b>}{" "}
+                  {p.them && p.yards ? p.yards + " yd " : ""}
+                  {VERB[p.action] || ""}{" "}
+                  {["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : ""}
+                  {["sack", "tfl"].indexOf(p.action) >= 0 && p.yards ? "−" + p.yards + " yd" : ""}
+                  {p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : ""}
+                  {p.assistIds && p.assistIds.length
+                    ? " · assist " + p.assistIds.map((id) => (byId[id] ? "#" + byId[id].num : "")).join(", ") : ""}
+                  {sc && <span style={{ color: "var(--stop)", fontWeight: 700 }}> · {sc.label}</span>}
+                </span>
+              );
+            }
+            return (
+              <React.Fragment key={p.id || i}>
+                {qBreak && <div className="eyebrow" style={{ margin: "10px 0 4px" }}>Quarter {p.quarter}</div>}
+                <div className="logline">
+                  <span className="eyebrow">{ORD[p.down]} &amp; {p.distance}</span>
+                  {body}
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+        <div className="empty-note" style={{ textAlign: "left", marginTop: 14 }}>
+          View only — you're following along live. Scores and plays appear here seconds after the
+          coaches log them.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ============================ MOUNT ============================ */
 
-ReactDOM.createRoot(document.getElementById("root")).render(<Sideline />);
+const WATCH_CODE = (() => {
+  try {
+    const m = (window.location.search || "").match(/[?&]watch=([A-Za-z0-9]{4})/);
+    return m ? m[1].toUpperCase() : null;
+  } catch (e) { return null; }
+})();
+
+ReactDOM.createRoot(document.getElementById("root"))
+  .render(WATCH_CODE ? <GameCast code={WATCH_CODE} /> : <Sideline />);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => { navigator.serviceWorker.register("./sw.js").catch(() => {}); });
