@@ -39,11 +39,20 @@ const ST_ACTIONS = [
 const SCORES = [
   { key: "none", label: "No score", pts: 0 },
   { key: "td", label: "Touchdown", pts: 6 },
-  { key: "pat", label: "PAT kick", pts: 1 },
-  { key: "two", label: "2-point", pts: 2 },
+  { key: "pat", label: "Conversion kick", pts: 1 },
+  { key: "two", label: "Conversion run/pass", pts: 2 },
   { key: "fg", label: "Field goal", pts: 3 },
   { key: "safety", label: "Safety", pts: 2 },
 ];
+/* Post-TD conversion values flip by level: elementary leagues score the kick
+   as 2 and the run/pass conversion as 1; high school is the reverse. Each
+   logged play stores its points, so changing the level later never rewrites
+   old games. (The SCORES pts above are only the fallback for old plays.) */
+const scoresFor = (level) => SCORES.map((s) =>
+  s.key === "pat" ? Object.assign({}, s, { pts: level === "highschool" ? 1 : 2 })
+  : s.key === "two" ? Object.assign({}, s, { pts: level === "highschool" ? 2 : 1 })
+  : s);
+
 const ORD = ["", "1st", "2nd", "3rd", "4th"];
 const UNITS = [
   { key: "offense", label: "Offense" },
@@ -61,7 +70,7 @@ const freshLineups = () => ({
   defense: mkSlots(DEFENSE_SLOTS),
   special: ST_KEYS.reduce((a, k) => Object.assign({}, a, { [k]: mkSlots(SPECIAL_TEAMS[k].slots) }), {}),
 });
-const freshSquad = () => ({ roster: [], lineups: freshLineups(), minPlays: 8, schedule: [], rev: 0 });
+const freshSquad = () => ({ roster: [], lineups: freshLineups(), minPlays: 8, schedule: [], scoring: "elementary", rev: 0 });
 const BASE = () => ({ quarter: 1, us: 0, them: 0, down: 1, distance: 10, unit: "offense",
   stKey: "kickoff", swaps: {}, plays: [] });
 
@@ -89,7 +98,7 @@ function fold(ops) {
     if (o.type !== "play") return;
 
     const sc = SCORES.find((x) => x.key === o.score);
-    const pts = sc ? sc.pts : 0;
+    const pts = o.pts != null ? o.pts : sc ? sc.pts : 0;
     g.plays.push(Object.assign({}, o, { down: g.down, distance: g.distance, quarter: g.quarter }));
     if (pts > 0) {
       const ours = o.unit !== "defense" || o.score === "td" || o.score === "safety";
@@ -140,7 +149,7 @@ function tally(plays) {
     if (p.action === "pbu") s.pbu++;
     if (p.score === "td") s.td++;
     const sc = SCORES.find((x) => x.key === p.score);
-    if (sc) s.pts += sc.pts;
+    if (sc || p.pts != null) s.pts += p.pts != null ? p.pts : sc.pts;
   });
   return m;
 }
@@ -469,10 +478,12 @@ function Sideline() {
     if (elsewhere) putIn(elsewhere.id, slot.playerId || null, group);
     putIn(slot.id, playerId, group);
   };
-  const logPlay = ({ playerId, action, yards, score, passerId }) => {
+  const scores = scoresFor(squad.scoring || "elementary");
+  const logPlay = ({ playerId, action, yards, score, passerId, scorePts }) => {
     addOp({ type: "play", unit: game.unit, stKey: game.unit === "special" ? game.stKey : null,
       playerId: playerId || null, action: action || null, yards: yards || 0, passerId: passerId || null,
-      score: score && score !== "none" ? score : null, snaps: fieldIds });
+      score: score && score !== "none" ? score : null,
+      pts: score && score !== "none" ? scorePts || 0 : null, snaps: fieldIds });
     setSheet(null);
   };
   const archive = (opponent, when) => {
@@ -558,7 +569,7 @@ function Sideline() {
 
       {sheet && sheet.type === "play" && (
         <PlaySheet slot={sheet.slot} player={byId[sheet.slot.playerId]} unit={game.unit}
-          onField={onField} byId={byId} onClose={() => setSheet(null)} onLog={logPlay} />)}
+          onField={onField} byId={byId} scores={scores} onClose={() => setSheet(null)} onLog={logPlay} />)}
       {sheet && sheet.type === "sub" && (
         <SubSheet slot={sheet.slot} roster={roster} byId={byId} onField={onField} statOf={statOf}
           minPlays={minPlays} onClose={() => setSheet(null)}
@@ -627,10 +638,10 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
         <div className="board-btm">
           <select className="dist-sel" aria-label="Distance to gain" value={game.distance}
             onChange={(e) => set("distance", parseInt(e.target.value, 10))}>
-            {Array.from({ length: 40 }, (_, i) => i + 1).map((d) => (
+            {Array.from({ length: 100 }, (_, i) => i + 1).map((d) => (
               <option key={d} value={d}>{d} {d === 1 ? "yard" : "yards"} to go</option>
             ))}
-            {game.distance > 40 && <option value={game.distance}>{game.distance} yards to go</option>}
+            {game.distance > 100 && <option value={game.distance}>{game.distance} yards to go</option>}
           </select>
           <button className="chip" onClick={() => set("quarter", (game.quarter % 4) + 1)}>Q{game.quarter}</button>
         </div>
@@ -771,7 +782,7 @@ function PlayLog({ game, byId, addOp }) {
 
 /* ============================ SHEETS ============================ */
 
-function PlaySheet({ slot, player, unit, onField, byId, onClose, onLog }) {
+function PlaySheet({ slot, player, unit, onField, byId, scores, onClose, onLog }) {
   const actions = unit === "offense" ? OFF_ACTIONS : unit === "defense" ? DEF_ACTIONS : ST_ACTIONS;
   const [action, setAction] = useState(actions[0].key);
   const [yards, setYards] = useState(0);
@@ -810,7 +821,7 @@ function PlaySheet({ slot, player, unit, onField, byId, onClose, onLog }) {
               {yards > 0 ? "+" : ""}{yards}</div>
             <select className="inp" aria-label="Yards on the play" value={yards} style={{ marginTop: 8 }}
               onChange={(e) => setYards(parseInt(e.target.value, 10))}>
-              {Array.from({ length: 120 }, (_, i) => i - 20).map((y) => (
+              {Array.from({ length: 201 }, (_, i) => i - 100).map((y) => (
                 <option key={y} value={y}>{(y > 0 ? "+" + y : y) + (Math.abs(y) === 1 ? " yard" : " yards")}</option>
               ))}
             </select>
@@ -830,7 +841,7 @@ function PlaySheet({ slot, player, unit, onField, byId, onClose, onLog }) {
         )}
         <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Points on the play</div>
         <div className="opts">
-          {SCORES.map((s) => (
+          {(scores || SCORES).map((s) => (
             <button key={s.key} className={"opt" + (score === s.key ? " on" : "")} onClick={() => setScore(s.key)}>
               <div className="opt-l">{s.label}</div><div className="opt-h">{s.pts ? "+" + s.pts : "—"}</div>
             </button>
@@ -838,6 +849,7 @@ function PlaySheet({ slot, player, unit, onField, byId, onClose, onLog }) {
         </div>
         <button className="confirm"
           onClick={() => onLog({ playerId: player.id, action, yards: needsYards ? yards : 0, score,
+            scorePts: (((scores || SCORES).find((x) => x.key === score)) || {}).pts || 0,
             passerId: isPassPlay ? passerId || null : null })}>
           Log the play</button>
       </div>
@@ -1093,6 +1105,19 @@ function RosterTab({ squad, setSquad, statOf }) {
         <input className="inp" style={{ width: 72, textAlign: "center", fontSize: 20, fontWeight: 700 }} inputMode="numeric"
           value={squad.minPlays}
           onChange={(e) => setSquad((s) => Object.assign({}, s, { minPlays: Math.max(1, parseInt(e.target.value, 10) || 1) }))} />
+      </div>
+
+      <div className="sechd"><div className="h2">Scoring</div></div>
+      <div className="row" style={{ flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 100%", fontSize: 14, color: "var(--soft)" }}>
+          After a touchdown: elementary leagues score the kick as 2 and a run or pass conversion as 1 —
+          high school flips it. Games already logged keep the points they were scored with.
+        </div>
+        <select className="inp" aria-label="Scoring level" value={squad.scoring || "elementary"}
+          onChange={(e) => setSquad((s) => Object.assign({}, s, { scoring: e.target.value }))}>
+          <option value="elementary">Elementary — kick +2 · run/pass +1</option>
+          <option value="highschool">High school — kick +1 · run/pass +2</option>
+        </select>
       </div>
     </React.Fragment>
   );

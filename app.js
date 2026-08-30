@@ -105,11 +105,11 @@ const SCORES = [{
   pts: 6
 }, {
   key: "pat",
-  label: "PAT kick",
+  label: "Conversion kick",
   pts: 1
 }, {
   key: "two",
-  label: "2-point",
+  label: "Conversion run/pass",
   pts: 2
 }, {
   key: "fg",
@@ -120,6 +120,15 @@ const SCORES = [{
   label: "Safety",
   pts: 2
 }];
+/* Post-TD conversion values flip by level: elementary leagues score the kick
+   as 2 and the run/pass conversion as 1; high school is the reverse. Each
+   logged play stores its points, so changing the level later never rewrites
+   old games. (The SCORES pts above are only the fallback for old plays.) */
+const scoresFor = level => SCORES.map(s => s.key === "pat" ? Object.assign({}, s, {
+  pts: level === "highschool" ? 1 : 2
+}) : s.key === "two" ? Object.assign({}, s, {
+  pts: level === "highschool" ? 2 : 1
+}) : s);
 const ORD = ["", "1st", "2nd", "3rd", "4th"];
 const UNITS = [{
   key: "offense",
@@ -166,6 +175,7 @@ const freshSquad = () => ({
   lineups: freshLineups(),
   minPlays: 8,
   schedule: [],
+  scoring: "elementary",
   rev: 0
 });
 const BASE = () => ({
@@ -210,7 +220,7 @@ function fold(ops) {
     }
     if (o.type !== "play") return;
     const sc = SCORES.find(x => x.key === o.score);
-    const pts = sc ? sc.pts : 0;
+    const pts = o.pts != null ? o.pts : sc ? sc.pts : 0;
     g.plays.push(Object.assign({}, o, {
       down: g.down,
       distance: g.distance,
@@ -312,7 +322,7 @@ function tally(plays) {
     if (p.action === "pbu") s.pbu++;
     if (p.score === "td") s.td++;
     const sc = SCORES.find(x => x.key === p.score);
-    if (sc) s.pts += sc.pts;
+    if (sc || p.pts != null) s.pts += p.pts != null ? p.pts : sc.pts;
   });
   return m;
 }
@@ -810,12 +820,14 @@ function Sideline() {
     if (elsewhere) putIn(elsewhere.id, slot.playerId || null, group);
     putIn(slot.id, playerId, group);
   };
+  const scores = scoresFor(squad.scoring || "elementary");
   const logPlay = ({
     playerId,
     action,
     yards,
     score,
-    passerId
+    passerId,
+    scorePts
   }) => {
     addOp({
       type: "play",
@@ -826,6 +838,7 @@ function Sideline() {
       yards: yards || 0,
       passerId: passerId || null,
       score: score && score !== "none" ? score : null,
+      pts: score && score !== "none" ? scorePts || 0 : null,
       snaps: fieldIds
     });
     setSheet(null);
@@ -967,6 +980,7 @@ function Sideline() {
     unit: game.unit,
     onField: onField,
     byId: byId,
+    scores: scores,
     onClose: () => setSheet(null),
     onLog: logPlay
   }), sheet && sheet.type === "sub" && /*#__PURE__*/React.createElement(SubSheet, {
@@ -1109,11 +1123,11 @@ function GameTab({
     value: game.distance,
     onChange: e => set("distance", parseInt(e.target.value, 10))
   }, Array.from({
-    length: 40
+    length: 100
   }, (_, i) => i + 1).map(d => /*#__PURE__*/React.createElement("option", {
     key: d,
     value: d
-  }, d, " ", d === 1 ? "yard" : "yards", " to go")), game.distance > 40 && /*#__PURE__*/React.createElement("option", {
+  }, d, " ", d === 1 ? "yard" : "yards", " to go")), game.distance > 100 && /*#__PURE__*/React.createElement("option", {
     value: game.distance
   }, game.distance, " yards to go")), /*#__PURE__*/React.createElement("button", {
     className: "chip",
@@ -1312,6 +1326,7 @@ function PlaySheet({
   unit,
   onField,
   byId,
+  scores,
   onClose,
   onLog
 }) {
@@ -1376,8 +1391,8 @@ function PlaySheet({
     },
     onChange: e => setYards(parseInt(e.target.value, 10))
   }, Array.from({
-    length: 120
-  }, (_, i) => i - 20).map(y => /*#__PURE__*/React.createElement("option", {
+    length: 201
+  }, (_, i) => i - 100).map(y => /*#__PURE__*/React.createElement("option", {
     key: y,
     value: y
   }, (y > 0 ? "+" + y : y) + (Math.abs(y) === 1 ? " yard" : " yards"))))), isPassPlay && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
@@ -1402,7 +1417,7 @@ function PlaySheet({
     }
   }, "Points on the play"), /*#__PURE__*/React.createElement("div", {
     className: "opts"
-  }, SCORES.map(s => /*#__PURE__*/React.createElement("button", {
+  }, (scores || SCORES).map(s => /*#__PURE__*/React.createElement("button", {
     key: s.key,
     className: "opt" + (score === s.key ? " on" : ""),
     onClick: () => setScore(s.key)
@@ -1417,6 +1432,7 @@ function PlaySheet({
       action,
       yards: needsYards ? yards : 0,
       score,
+      scorePts: ((scores || SCORES).find(x => x.key === score) || {}).pts || 0,
       passerId: isPassPlay ? passerId || null : null
     })
   }, "Log the play")));
@@ -1933,7 +1949,33 @@ function RosterTab({
     onChange: e => setSquad(s => Object.assign({}, s, {
       minPlays: Math.max(1, parseInt(e.target.value, 10) || 1)
     }))
-  })));
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "sechd"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h2"
+  }, "Scoring")), /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: "1 1 100%",
+      fontSize: 14,
+      color: "var(--soft)"
+    }
+  }, "After a touchdown: elementary leagues score the kick as 2 and a run or pass conversion as 1 \u2014 high school flips it. Games already logged keep the points they were scored with."), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Scoring level",
+    value: squad.scoring || "elementary",
+    onChange: e => setSquad(s => Object.assign({}, s, {
+      scoring: e.target.value
+    }))
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "elementary"
+  }, "Elementary \u2014 kick +2 \xB7 run/pass +1"), /*#__PURE__*/React.createElement("option", {
+    value: "highschool"
+  }, "High school \u2014 kick +1 \xB7 run/pass +2"))));
 }
 
 /* ============================ LINEUPS ============================ */

@@ -124,8 +124,8 @@ const type = (el, val) => {
   click(byText(".opt", "Ran it"));
   await flush();
   const yardSel = $(".yardbox select");
-  ok("yards dropdown covers losses through 99", !!yardSel && yardSel.options.length === 120 &&
-    yardSel.options[0].value === "-20" && yardSel.options[119].value === "99");
+  ok("yards dropdown covers -100 through 100", !!yardSel && yardSel.options.length === 201 &&
+    yardSel.options[0].value === "-100" && yardSel.options[200].value === "100");
   sSetter.call(yardSel, "10");
   yardSel.dispatchEvent(new w.Event("change", { bubbles: true }));
   await flush();
@@ -275,8 +275,8 @@ const type = (el, val) => {
   click(byText(".nav button", "Game"));
   await flush();
   const distSel = $(".dist-sel");
-  ok("distance dropdown lists 1 to 40", !!distSel && distSel.options.length === 40 &&
-    distSel.options[0].value === "1" && distSel.options[39].value === "40");
+  ok("distance dropdown lists 1 to 100", !!distSel && distSel.options.length === 100 &&
+    distSel.options[0].value === "1" && distSel.options[99].value === "100");
   sSetter.call(distSel, "25");
   distSel.dispatchEvent(new w.Event("change", { bubbles: true }));
   await flush();
@@ -342,6 +342,21 @@ const type = (el, val) => {
     eStatRow.querySelectorAll("td")[3].textContent === "1" && eStatRow.querySelectorAll("td")[4].textContent === "15");
   click(byText(".nav button", "Game"));
   await flush();
+
+  console.log("\nelementary conversions");
+  const convCard = $$(".pcard").find((c) => c.textContent.indexOf("Eli") >= 0);
+  click(convCard.querySelector(".pc-top"));
+  await flush();
+  const kickOpt = byText(".opt", "Conversion kick");
+  const runOpt = byText(".opt", "Conversion run/pass");
+  ok("conversion kick is worth 2 at elementary level", !!kickOpt && kickOpt.textContent.indexOf("+2") >= 0);
+  ok("conversion run/pass is worth 1 at elementary level", !!runOpt && runOpt.textContent.indexOf("+1") >= 0);
+  click(byText(".opt", "Ran it"));
+  click(runOpt);
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  ok("run conversion put 1 on the board", $$(".score-num")[0].textContent === "1");
 
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
