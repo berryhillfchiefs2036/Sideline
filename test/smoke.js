@@ -398,6 +398,37 @@ const type = (el, val) => {
   click(byText(".nav button", "Game"));
   await flush();
 
+  console.log("\npenalties");
+  ok("board shows 5 plays before the flag", $(".dd-sub").textContent.indexOf("5 plays") >= 0);
+  click(byText(".abtn", "Flag"));
+  await flush();
+  const whoSel = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Who was flagged");
+  ok("penalty sheet opened", !!whoSel);
+  const jWho = Array.from(whoSel.options).find((o) => o.textContent.indexOf("Jordan") >= 0);
+  sSetter.call(whoSel, jWho.value);
+  whoSel.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  const kindSel = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Penalty type");
+  const holdOpt = Array.from(kindSel.options).find((o) => o.textContent.indexOf("Holding — offense") >= 0);
+  sSetter.call(kindSel, holdOpt.value);
+  kindSel.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  const penYds = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Penalty yards");
+  ok("penalty type preset its yardage", penYds && penYds.value === "10");
+  click(byText(".opt", "The ball side"));
+  await flush();
+  click(byText(".confirm", "Log the penalty"));
+  await flush();
+  ok("offense penalty backed the distance up", $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("1st & 20") >= 0);
+  ok("penalty is not counted as a play run", $(".dd-sub").textContent.indexOf("5 plays") >= 0);
+  ok("penalty shows in the play log", !!byText(".logline", "Holding"));
+  click(byText(".nav button", "Stats"));
+  await flush();
+  const jPenRow = $$("tbody tr").find((r) => r.textContent.indexOf("Jordan") >= 0);
+  ok("penalty counted for the player", jPenRow && jPenRow.querySelectorAll("td")[5].textContent === "1");
+  click(byText(".nav button", "Game"));
+  await flush();
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

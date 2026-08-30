@@ -107,6 +107,107 @@ const ST_ACTIONS = [{
   label: "Recovered",
   hint: "loose ball"
 }];
+const PENALTIES = [{
+  key: "falsestart",
+  label: "False start",
+  yds: 5
+}, {
+  key: "offside",
+  label: "Offside",
+  yds: 5
+}, {
+  key: "encroachment",
+  label: "Encroachment",
+  yds: 5
+}, {
+  key: "delay",
+  label: "Delay of game",
+  yds: 5
+}, {
+  key: "illform",
+  label: "Illegal formation",
+  yds: 5
+}, {
+  key: "illmotion",
+  label: "Illegal motion",
+  yds: 5
+}, {
+  key: "toomany",
+  label: "Too many players",
+  yds: 5
+}, {
+  key: "holdoff",
+  label: "Holding — offense",
+  yds: 10
+}, {
+  key: "holddef",
+  label: "Holding — defense",
+  yds: 10
+}, {
+  key: "blockback",
+  label: "Block in the back",
+  yds: 10
+}, {
+  key: "handsface",
+  label: "Hands to the face",
+  yds: 10
+}, {
+  key: "tripping",
+  label: "Tripping",
+  yds: 10
+}, {
+  key: "grounding",
+  label: "Intentional grounding",
+  yds: 10
+}, {
+  key: "facemask",
+  label: "Face mask",
+  yds: 15
+}, {
+  key: "opi",
+  label: "Pass interference — offense",
+  yds: 15
+}, {
+  key: "dpi",
+  label: "Pass interference — defense",
+  yds: 15
+}, {
+  key: "roughpass",
+  label: "Roughing the passer",
+  yds: 15
+}, {
+  key: "roughkick",
+  label: "Roughing the kicker",
+  yds: 15
+}, {
+  key: "horsecollar",
+  label: "Horse collar",
+  yds: 15
+}, {
+  key: "clipping",
+  label: "Clipping",
+  yds: 15
+}, {
+  key: "chopblock",
+  label: "Chop block",
+  yds: 15
+}, {
+  key: "unsports",
+  label: "Unsportsmanlike conduct",
+  yds: 15
+}, {
+  key: "personal",
+  label: "Personal foul",
+  yds: 15
+}, {
+  key: "targeting",
+  label: "Targeting",
+  yds: 15
+}, {
+  key: "other",
+  label: "Other",
+  yds: 5
+}];
 const SCORES = [{
   key: "none",
   label: "No score",
@@ -232,6 +333,28 @@ function fold(ops) {
       });
       return;
     }
+    if (o.type === "pen") {
+      /* Flags land in the log with the situation they were thrown at, then
+         walk the distance off: against the ball side backs the offense up
+         (replay the down); against the defense moves the chains, with an
+         automatic first down when the yardage covers the distance. Manual
+         down/distance taps still override, as always. */
+      g.plays.push(Object.assign({}, o, {
+        down: g.down,
+        distance: g.distance,
+        quarter: g.quarter
+      }));
+      if (o.side === "defense") {
+        g.distance = g.distance - (o.yards || 0);
+        if (g.distance <= 0) {
+          g.down = 1;
+          g.distance = 10;
+        }
+      } else {
+        g.distance = g.distance + (o.yards || 0);
+      }
+      return;
+    }
     if (o.type !== "play") return;
     const sc = SCORES.find(x => x.key === o.score);
     const pts = o.pts != null ? o.pts : sc ? sc.pts : 0;
@@ -266,6 +389,7 @@ function fold(ops) {
     }
   });
   g.live = live;
+  g.playCount = g.plays.filter(p => p.type !== "pen").length;
   return g;
 }
 const blank = () => ({
@@ -294,6 +418,8 @@ const blank = () => ({
   int: 0,
   fr: 0,
   pbu: 0,
+  pen: 0,
+  penY: 0,
   td: 0,
   pts: 0
 });
@@ -301,6 +427,14 @@ function tally(plays) {
   const m = {};
   const g = id => m[id] = m[id] || blank();
   plays.forEach(p => {
+    if (p.type === "pen") {
+      if (p.playerId) {
+        const s = g(p.playerId);
+        s.pen++;
+        s.penY += p.yards || 0;
+      }
+      return;
+    }
     (p.snaps || []).forEach(id => {
       const s = g(id);
       s.snaps++;
@@ -900,7 +1034,7 @@ function Sideline() {
       opponent: opponent || "",
       us: game.us,
       them: game.them,
-      playsCount: game.plays.length,
+      playsCount: game.playCount,
       plays: game.plays,
       players
     });
@@ -947,7 +1081,7 @@ function Sideline() {
     });
     setTab("game");
   };
-  const lastUndoable = game.live.slice().reverse().find(o => ["play", "sub", "adj", "set"].indexOf(o.type) >= 0);
+  const lastUndoable = game.live.slice().reverse().find(o => ["play", "pen", "sub", "adj", "set"].indexOf(o.type) >= 0);
   const undo = () => {
     if (!lastUndoable) return;
     const targets = lastUndoable.group ? game.live.filter(o => o.group === lastUndoable.group).map(o => o.id) : [lastUndoable.id];
@@ -1034,6 +1168,16 @@ function Sideline() {
     onClose: () => setSheet(null),
     onPick: pid => {
       assign(sheet.slot, pid);
+      setSheet(null);
+    }
+  }), sheet && sheet.type === "pen" && /*#__PURE__*/React.createElement(PenaltySheet, {
+    roster: roster,
+    unit: game.unit,
+    onClose: () => setSheet(null),
+    onLog: pen => {
+      addOp(Object.assign({
+        type: "pen"
+      }, pen));
       setSheet(null);
     }
   }), sheet && sheet.type === "crew" && /*#__PURE__*/React.createElement(CrewSheet, {
@@ -1128,7 +1272,7 @@ function GameTab({
     className: "dd-main"
   }, ORD[game.down], " ", /*#__PURE__*/React.createElement("small", null, "&"), " ", game.distance), /*#__PURE__*/React.createElement("div", {
     className: "dd-sub"
-  }, "Quarter ", game.quarter, " \xB7 ", game.plays.length, " plays run")), /*#__PURE__*/React.createElement("div", {
+  }, "Quarter ", game.quarter, " \xB7 ", game.playCount, " plays run")), /*#__PURE__*/React.createElement("div", {
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
@@ -1275,6 +1419,11 @@ function GameTab({
       score: "none"
     })
   }, "Snap, no stat"), /*#__PURE__*/React.createElement("button", {
+    className: "abtn",
+    onClick: () => setSheet({
+      type: "pen"
+    })
+  }, "Flag"), /*#__PURE__*/React.createElement("button", {
     className: "abtn ghost",
     disabled: !canUndo,
     onClick: undo
@@ -1327,6 +1476,36 @@ function PlayLog({
     className: "eyebrow"
   }, "Latest first")), /*#__PURE__*/React.createElement("div", null, recent.map(p => {
     const pl = byId[p.playerId];
+    if (p.type === "pen") {
+      const pk = PENALTIES.find(x => x.key === p.kind);
+      return /*#__PURE__*/React.createElement("div", {
+        className: "logline",
+        key: p.id
+      }, /*#__PURE__*/React.createElement("span", {
+        className: "eyebrow"
+      }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("b", {
+        style: {
+          color: "var(--stop)"
+        }
+      }, "Flag"), " ", pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : p.ours ? "on us" : "on them", " — ", pk ? pk.label : "penalty", ", ", p.yards, " yd"), /*#__PURE__*/React.createElement("span", {
+        className: "who"
+      }, p.byName || ""), /*#__PURE__*/React.createElement("button", {
+        className: "mini",
+        style: {
+          flex: "0 0 auto",
+          padding: "2px 8px"
+        },
+        "aria-label": "Remove this penalty",
+        onClick: () => {
+          if (window.confirm("Take this penalty out? The down and distance recalculate without it.")) {
+            addOp({
+              type: "undo",
+              targets: [p.id]
+            });
+          }
+        }
+      }, "\u2715"));
+    }
     const sc = SCORES.find(x => x.key === p.score);
     return /*#__PURE__*/React.createElement("div", {
       className: "logline",
@@ -1599,6 +1778,119 @@ function SubSheet({
     },
     onClick: () => onPick(null)
   }, "Leave this spot open")));
+}
+function PenaltySheet({
+  roster,
+  unit,
+  onClose,
+  onLog
+}) {
+  const [who, setWho] = useState("them");
+  const [kind, setKind] = useState("falsestart");
+  const [yards, setYards] = useState(5);
+  const ballSideOurs = unit !== "defense";
+  const [side, setSide] = useState(ballSideOurs ? "defense" : "offense");
+  const pickWho = v => {
+    setWho(v);
+    const ours = v !== "them";
+    setSide(ours === ballSideOurs ? "offense" : "defense");
+  };
+  const pickKind = k => {
+    setKind(k);
+    const pk = PENALTIES.find(x => x.key === k);
+    if (pk) setYards(pk.yds);
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "veil",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sheet",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sheet-hd"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "sheet-ttl"
+  }, "Penalty"), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, "The flag fixes down & distance for you")), /*#__PURE__*/React.createElement("button", {
+    className: "close",
+    onClick: onClose
+  }, "Cancel")), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      marginBottom: 6
+    }
+  }, "Who was flagged"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Who was flagged",
+    value: who,
+    onChange: e => pickWho(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "them"
+  }, "The other team"), /*#__PURE__*/React.createElement("option", {
+    value: "us"
+  }, "Us \u2014 no one in particular"), roster.map(p => /*#__PURE__*/React.createElement("option", {
+    key: p.id,
+    value: p.id
+  }, "#", p.num, " ", p.name))), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "The call"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Penalty type",
+    value: kind,
+    onChange: e => pickKind(e.target.value)
+  }, PENALTIES.map(x => /*#__PURE__*/React.createElement("option", {
+    key: x.key,
+    value: x.key
+  }, x.label, " (", x.yds, ")"))), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "Yards walked off"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Penalty yards",
+    value: yards,
+    onChange: e => setYards(parseInt(e.target.value, 10))
+  }, Array.from({
+    length: 50
+  }, (_, i) => i + 1).map(y => /*#__PURE__*/React.createElement("option", {
+    key: y,
+    value: y
+  }, y, " ", y === 1 ? "yard" : "yards"))), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "Enforced against"), /*#__PURE__*/React.createElement("div", {
+    className: "opts"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "opt" + (side === "offense" ? " on" : ""),
+    onClick: () => setSide("offense")
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "opt-l"
+  }, "The ball side"), /*#__PURE__*/React.createElement("div", {
+    className: "opt-h"
+  }, "backs up \xB7 replay the down")), /*#__PURE__*/React.createElement("button", {
+    className: "opt" + (side === "defense" ? " on" : ""),
+    onClick: () => setSide("defense")
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "opt-l"
+  }, "The defending side"), /*#__PURE__*/React.createElement("div", {
+    className: "opt-h"
+  }, "chains move up"))), /*#__PURE__*/React.createElement("button", {
+    className: "confirm alt",
+    onClick: () => onLog({
+      playerId: who !== "them" && who !== "us" ? who : null,
+      ours: who !== "them",
+      side,
+      kind,
+      yards
+    })
+  }, "Log the penalty")));
 }
 function CrewSheet({
   me,
@@ -2188,11 +2480,11 @@ function StatsTab({
   const plays = rows.slice().sort((a, b) => a.s.snaps - b.s.snaps);
   const short = plays.filter(r => r.s.snaps < minPlays);
   const exportCsv = () => {
-    const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
+    const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
     const body = rows.slice().sort((a, b) => (parseInt(a.p.num, 10) || 0) - (parseInt(b.p.num, 10) || 0)).map(({
       p,
       s
-    }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY, s.cmp, s.att, s.passY, s.kicks, s.kickY, s.ret, s.retY, s.fgm, s.fga, s.convM, s.convA, s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.td, s.pts]);
+    }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY, s.cmp, s.att, s.passY, s.kicks, s.kickY, s.ret, s.retY, s.fgm, s.fga, s.convM, s.convA, s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.pen, s.penY, s.td, s.pts]);
     const csv = [head].concat(body).map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv");
   };
@@ -2202,7 +2494,7 @@ function StatsTab({
     className: "h2"
   }, "Stats"), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, game.plays.length, " plays")), /*#__PURE__*/React.createElement("div", {
+  }, game.playCount, " plays")), /*#__PURE__*/React.createElement("div", {
     className: "stbar"
   }, [["plays", "Play count"], ["off", "Offense"], ["def", "Defense"], ["st", "Special"]].map(v => /*#__PURE__*/React.createElement("button", {
     key: v[0],
@@ -2222,7 +2514,7 @@ function StatsTab({
     style: {
       color: "var(--soft)"
     }
-  }, "Get them in: ", short.slice(0, 6).map(r => "#" + r.p.num).join(", ")))), /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Off"), /*#__PURE__*/React.createElement("th", null, "Def"), /*#__PURE__*/React.createElement("th", null, "Spec"), /*#__PURE__*/React.createElement("th", null, "Total"))), /*#__PURE__*/React.createElement("tbody", null, plays.map(({
+  }, "Get them in: ", short.slice(0, 6).map(r => "#" + r.p.num).join(", ")))), /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Off"), /*#__PURE__*/React.createElement("th", null, "Def"), /*#__PURE__*/React.createElement("th", null, "Spec"), /*#__PURE__*/React.createElement("th", null, "Total"), /*#__PURE__*/React.createElement("th", null, "Pen"))), /*#__PURE__*/React.createElement("tbody", null, plays.map(({
     p,
     s
   }) => /*#__PURE__*/React.createElement("tr", {
@@ -2239,7 +2531,9 @@ function StatsTab({
     style: {
       color: s.snaps < minPlays ? "var(--stop)" : "var(--go)"
     }
-  }, s.snaps)))))), view === "off" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Car"), /*#__PURE__*/React.createElement("th", null, "Rush"), /*#__PURE__*/React.createElement("th", null, "Rec"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Pass"), /*#__PURE__*/React.createElement("th", null, "PsYd"), /*#__PURE__*/React.createElement("th", null, "TD"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.rushY + b.s.recY - (a.s.rushY + a.s.recY)).map(({
+  }, s.snaps), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.pen)))))), view === "off" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Car"), /*#__PURE__*/React.createElement("th", null, "Rush"), /*#__PURE__*/React.createElement("th", null, "Rec"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Pass"), /*#__PURE__*/React.createElement("th", null, "PsYd"), /*#__PURE__*/React.createElement("th", null, "TD"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.rushY + b.s.recY - (a.s.rushY + a.s.recY)).map(({
     p,
     s
   }) => /*#__PURE__*/React.createElement("tr", {
@@ -2474,8 +2768,8 @@ function SeasonTab({
   const pa = shown.reduce((a, g) => a + (g.them || 0), 0);
   const newest = shown.slice().sort((a, b) => a.endedAt < b.endedAt ? 1 : -1);
   const exportCsv = () => {
-    const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
-    const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0)).map(t => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY, t.cmp, t.att, t.passY, t.kicks, t.kickY, t.ret, t.retY, t.fgm, t.fga, t.convM, t.convA, t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.td, t.pts]);
+    const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
+    const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0)).map(t => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY, t.cmp, t.att, t.passY, t.kicks, t.kickY, t.ret, t.retY, t.fgm, t.fga, t.convM, t.convA, t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.pen, t.penY, t.td, t.pts]);
     const csv = [head].concat(body).map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-season-" + (year === "all" ? "all" : year) + ".csv", csv, "text/csv");
   };
@@ -2539,7 +2833,7 @@ function SeasonTab({
     key: v[0],
     className: view === v[0] ? "on" : "",
     onClick: () => setView(v[0])
-  }, v[1]))), view === "plays" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "GP"), /*#__PURE__*/React.createElement("th", null, "Off"), /*#__PURE__*/React.createElement("th", null, "Def"), /*#__PURE__*/React.createElement("th", null, "Spec"), /*#__PURE__*/React.createElement("th", null, "Total"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.snaps - a.snaps).map(t => /*#__PURE__*/React.createElement("tr", {
+  }, v[1]))), view === "plays" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "GP"), /*#__PURE__*/React.createElement("th", null, "Off"), /*#__PURE__*/React.createElement("th", null, "Def"), /*#__PURE__*/React.createElement("th", null, "Spec"), /*#__PURE__*/React.createElement("th", null, "Total"), /*#__PURE__*/React.createElement("th", null, "Pen"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.snaps - a.snaps).map(t => /*#__PURE__*/React.createElement("tr", {
     key: t.id
   }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", t.num), " ", t.name), /*#__PURE__*/React.createElement("td", {
     className: "n"
@@ -2551,7 +2845,9 @@ function SeasonTab({
     className: "n"
   }, t.st), /*#__PURE__*/React.createElement("td", {
     className: "n"
-  }, t.snaps))))), view === "off" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Car"), /*#__PURE__*/React.createElement("th", null, "Rush"), /*#__PURE__*/React.createElement("th", null, "Rec"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Pass"), /*#__PURE__*/React.createElement("th", null, "PsYd"), /*#__PURE__*/React.createElement("th", null, "TD"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.rushY + b.recY - (a.rushY + a.recY)).map(t => /*#__PURE__*/React.createElement("tr", {
+  }, t.snaps), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.pen))))), view === "off" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Car"), /*#__PURE__*/React.createElement("th", null, "Rush"), /*#__PURE__*/React.createElement("th", null, "Rec"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Pass"), /*#__PURE__*/React.createElement("th", null, "PsYd"), /*#__PURE__*/React.createElement("th", null, "TD"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.rushY + b.recY - (a.rushY + a.recY)).map(t => /*#__PURE__*/React.createElement("tr", {
     key: t.id
   }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", t.num), " ", t.name), /*#__PURE__*/React.createElement("td", {
     className: "n"

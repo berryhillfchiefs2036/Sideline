@@ -39,6 +39,34 @@ const ST_ACTIONS = [
   { key: "tackle", label: "Tackle", hint: "coverage" },
   { key: "fumrec", label: "Recovered", hint: "loose ball" },
 ];
+const PENALTIES = [
+  { key: "falsestart", label: "False start", yds: 5 },
+  { key: "offside", label: "Offside", yds: 5 },
+  { key: "encroachment", label: "Encroachment", yds: 5 },
+  { key: "delay", label: "Delay of game", yds: 5 },
+  { key: "illform", label: "Illegal formation", yds: 5 },
+  { key: "illmotion", label: "Illegal motion", yds: 5 },
+  { key: "toomany", label: "Too many players", yds: 5 },
+  { key: "holdoff", label: "Holding — offense", yds: 10 },
+  { key: "holddef", label: "Holding — defense", yds: 10 },
+  { key: "blockback", label: "Block in the back", yds: 10 },
+  { key: "handsface", label: "Hands to the face", yds: 10 },
+  { key: "tripping", label: "Tripping", yds: 10 },
+  { key: "grounding", label: "Intentional grounding", yds: 10 },
+  { key: "facemask", label: "Face mask", yds: 15 },
+  { key: "opi", label: "Pass interference — offense", yds: 15 },
+  { key: "dpi", label: "Pass interference — defense", yds: 15 },
+  { key: "roughpass", label: "Roughing the passer", yds: 15 },
+  { key: "roughkick", label: "Roughing the kicker", yds: 15 },
+  { key: "horsecollar", label: "Horse collar", yds: 15 },
+  { key: "clipping", label: "Clipping", yds: 15 },
+  { key: "chopblock", label: "Chop block", yds: 15 },
+  { key: "unsports", label: "Unsportsmanlike conduct", yds: 15 },
+  { key: "personal", label: "Personal foul", yds: 15 },
+  { key: "targeting", label: "Targeting", yds: 15 },
+  { key: "other", label: "Other", yds: 5 },
+];
+
 const SCORES = [
   { key: "none", label: "No score", pts: 0 },
   { key: "td", label: "Touchdown", pts: 6 },
@@ -99,6 +127,21 @@ function fold(ops) {
       g.swaps[o.unit][k] = Object.assign({}, g.swaps[o.unit][k] || {}, { [o.slotId]: o.playerId });
       return;
     }
+    if (o.type === "pen") {
+      /* Flags land in the log with the situation they were thrown at, then
+         walk the distance off: against the ball side backs the offense up
+         (replay the down); against the defense moves the chains, with an
+         automatic first down when the yardage covers the distance. Manual
+         down/distance taps still override, as always. */
+      g.plays.push(Object.assign({}, o, { down: g.down, distance: g.distance, quarter: g.quarter }));
+      if (o.side === "defense") {
+        g.distance = g.distance - (o.yards || 0);
+        if (g.distance <= 0) { g.down = 1; g.distance = 10; }
+      } else {
+        g.distance = g.distance + (o.yards || 0);
+      }
+      return;
+    }
     if (o.type !== "play") return;
 
     const sc = SCORES.find((x) => x.key === o.score);
@@ -118,17 +161,22 @@ function fold(ops) {
     }
   });
   g.live = live;
+  g.playCount = g.plays.filter((p) => p.type !== "pen").length;
   return g;
 }
 
 const blank = () => ({ snaps: 0, off: 0, def: 0, st: 0, rush: 0, rushY: 0, rec: 0, recY: 0,
   cmp: 0, att: 0, passY: 0, kicks: 0, kickY: 0, ret: 0, retY: 0, fgm: 0, fga: 0, convM: 0, convA: 0,
-  tk: 0, ast: 0, sack: 0, int: 0, fr: 0, pbu: 0, td: 0, pts: 0 });
+  tk: 0, ast: 0, sack: 0, int: 0, fr: 0, pbu: 0, pen: 0, penY: 0, td: 0, pts: 0 });
 
 function tally(plays) {
   const m = {};
   const g = (id) => (m[id] = m[id] || blank());
   plays.forEach((p) => {
+    if (p.type === "pen") {
+      if (p.playerId) { const s = g(p.playerId); s.pen++; s.penY += p.yards || 0; }
+      return;
+    }
     (p.snaps || []).forEach((id) => {
       const s = g(id); s.snaps++;
       if (p.unit === "offense") s.off++; else if (p.unit === "defense") s.def++; else s.st++;
@@ -508,7 +556,7 @@ function Sideline() {
       ? new Date(when.trim() + "T12:00:00").toISOString()
       : new Date().toISOString();
     S.archiveGame({ id: uid(), endedAt, opponent: opponent || "",
-      us: game.us, them: game.them, playsCount: game.plays.length, plays: game.plays, players });
+      us: game.us, them: game.them, playsCount: game.playCount, plays: game.plays, players });
     /* If this board was tracking a scheduled game, stamp that schedule entry
        as completed with the final score. */
     const schedId = (game.gameInfo || {}).schedId;
@@ -546,7 +594,7 @@ function Sideline() {
     setTab("game");
   };
 
-  const lastUndoable = game.live.slice().reverse().find((o) => ["play", "sub", "adj", "set"].indexOf(o.type) >= 0);
+  const lastUndoable = game.live.slice().reverse().find((o) => ["play", "pen", "sub", "adj", "set"].indexOf(o.type) >= 0);
   const undo = () => {
     if (!lastUndoable) return;
     const targets = lastUndoable.group
@@ -586,6 +634,9 @@ function Sideline() {
         <SubSheet slot={sheet.slot} roster={roster} byId={byId} onField={onField} statOf={statOf}
           minPlays={minPlays} onClose={() => setSheet(null)}
           onPick={(pid) => { assign(sheet.slot, pid); setSheet(null); }} />)}
+      {sheet && sheet.type === "pen" && (
+        <PenaltySheet roster={roster} unit={game.unit} onClose={() => setSheet(null)}
+          onLog={(pen) => { addOp(Object.assign({ type: "pen" }, pen)); setSheet(null); }} />)}
       {sheet && sheet.type === "crew" && (
         <CrewSheet me={S.me} code={code} sync={sync} available={S.crewAvailable} onJoin={S.joinCrew}
           onLeave={S.leaveCrew} onRename={S.renameMe} onClose={() => setSheet(null)} />)}
@@ -631,7 +682,7 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
           </div>
           <div className="dd">
             <div className="dd-main">{ORD[game.down]} <small>&amp;</small> {game.distance}</div>
-            <div className="dd-sub">Quarter {game.quarter} · {game.plays.length} plays run</div>
+            <div className="dd-sub">Quarter {game.quarter} · {game.playCount} plays run</div>
           </div>
           <div className="score-blk">
             <div className="eyebrow">Them</div>
@@ -732,6 +783,7 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
       <div className="actionbar">
         <button className="abtn" disabled={filled === 0}
           onClick={() => logPlay({ playerId: null, action: "team", yards: 0, score: "none" })}>Snap, no stat</button>
+        <button className="abtn" onClick={() => setSheet({ type: "pen" })}>Flag</button>
         <button className="abtn ghost" disabled={!canUndo} onClick={undo}>Undo</button>
       </div>
 
@@ -766,6 +818,26 @@ function PlayLog({ game, byId, addOp }) {
       <div>
         {recent.map((p) => {
           const pl = byId[p.playerId];
+          if (p.type === "pen") {
+            const pk = PENALTIES.find((x) => x.key === p.kind);
+            return (
+              <div className="logline" key={p.id}>
+                <span className="eyebrow">{ORD[p.down]} &amp; {p.distance}</span>
+                <span>
+                  <b style={{ color: "var(--stop)" }}>Flag</b>{" "}
+                  {pl ? <b>#{pl.num} {pl.name}</b> : p.ours ? "on us" : "on them"}
+                  {" — "}{pk ? pk.label : "penalty"}, {p.yards} yd
+                </span>
+                <span className="who">{p.byName || ""}</span>
+                <button className="mini" style={{ flex: "0 0 auto", padding: "2px 8px" }}
+                  aria-label="Remove this penalty" onClick={() => {
+                    if (window.confirm("Take this penalty out? The down and distance recalculate without it.")) {
+                      addOp({ type: "undo", targets: [p.id] });
+                    }
+                  }}>✕</button>
+              </div>
+            );
+          }
           const sc = SCORES.find((x) => x.key === p.score);
           return (
             <div className="logline" key={p.id}>
@@ -928,6 +1000,67 @@ function SubSheet({ slot, roster, byId, onField, statOf, minPlays, onClose, onPi
           <button className="abtn ghost" style={{ width: "100%", marginTop: 12 }} onClick={() => onPick(null)}>
             Leave this spot open</button>
         )}
+      </div>
+    </div>
+  );
+}
+
+function PenaltySheet({ roster, unit, onClose, onLog }) {
+  const [who, setWho] = useState("them");
+  const [kind, setKind] = useState("falsestart");
+  const [yards, setYards] = useState(5);
+  const ballSideOurs = unit !== "defense";
+  const [side, setSide] = useState(ballSideOurs ? "defense" : "offense");
+  const pickWho = (v) => {
+    setWho(v);
+    const ours = v !== "them";
+    setSide(ours === ballSideOurs ? "offense" : "defense");
+  };
+  const pickKind = (k) => {
+    setKind(k);
+    const pk = PENALTIES.find((x) => x.key === k);
+    if (pk) setYards(pk.yds);
+  };
+  return (
+    <div className="veil" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-hd">
+          <div>
+            <div className="sheet-ttl">Penalty</div>
+            <div className="eyebrow">The flag fixes down &amp; distance for you</div>
+          </div>
+          <button className="close" onClick={onClose}>Cancel</button>
+        </div>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Who was flagged</div>
+        <select className="inp" aria-label="Who was flagged" value={who} onChange={(e) => pickWho(e.target.value)}>
+          <option value="them">The other team</option>
+          <option value="us">Us — no one in particular</option>
+          {roster.map((p) => <option key={p.id} value={p.id}>#{p.num} {p.name}</option>)}
+        </select>
+        <div className="eyebrow" style={{ margin: "12px 0 6px" }}>The call</div>
+        <select className="inp" aria-label="Penalty type" value={kind} onChange={(e) => pickKind(e.target.value)}>
+          {PENALTIES.map((x) => <option key={x.key} value={x.key}>{x.label} ({x.yds})</option>)}
+        </select>
+        <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Yards walked off</div>
+        <select className="inp" aria-label="Penalty yards" value={yards}
+          onChange={(e) => setYards(parseInt(e.target.value, 10))}>
+          {Array.from({ length: 50 }, (_, i) => i + 1).map((y) => (
+            <option key={y} value={y}>{y} {y === 1 ? "yard" : "yards"}</option>
+          ))}
+        </select>
+        <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Enforced against</div>
+        <div className="opts">
+          <button className={"opt" + (side === "offense" ? " on" : "")} onClick={() => setSide("offense")}>
+            <div className="opt-l">The ball side</div><div className="opt-h">backs up · replay the down</div>
+          </button>
+          <button className={"opt" + (side === "defense" ? " on" : "")} onClick={() => setSide("defense")}>
+            <div className="opt-l">The defending side</div><div className="opt-h">chains move up</div>
+          </button>
+        </div>
+        <button className="confirm alt" onClick={() => onLog({
+          playerId: who !== "them" && who !== "us" ? who : null,
+          ours: who !== "them", side, kind, yards })}>
+          Log the penalty</button>
       </div>
     </div>
   );
@@ -1239,18 +1372,19 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
   const exportCsv = () => {
     const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds",
       "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds",
-      "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
+      "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU",
+      "Penalties", "PenYds", "TD", "Points"];
     const body = rows.slice().sort((a, b) => (parseInt(a.p.num, 10) || 0) - (parseInt(b.p.num, 10) || 0))
       .map(({ p, s }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY,
         s.cmp, s.att, s.passY, s.kicks, s.kickY, s.ret, s.retY, s.fgm, s.fga, s.convM, s.convA,
-        s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.td, s.pts]);
+        s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.pen, s.penY, s.td, s.pts]);
     const csv = [head].concat(body).map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv");
   };
 
   return (
     <React.Fragment>
-      <div className="sechd"><div className="h2">Stats</div><div className="eyebrow">{game.plays.length} plays</div></div>
+      <div className="sechd"><div className="h2">Stats</div><div className="eyebrow">{game.playCount} plays</div></div>
       <div className="stbar">
         {[["plays", "Play count"], ["off", "Offense"], ["def", "Defense"], ["st", "Special"]].map((v) => (
           <button key={v[0]} className={view === v[0] ? "on" : ""} onClick={() => setView(v[0])}>{v[1]}</button>
@@ -1269,13 +1403,14 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
             </div>
           )}
           <table>
-            <thead><tr><th>Player</th><th>Off</th><th>Def</th><th>Spec</th><th>Total</th></tr></thead>
+            <thead><tr><th>Player</th><th>Off</th><th>Def</th><th>Spec</th><th>Total</th><th>Pen</th></tr></thead>
             <tbody>
               {plays.map(({ p, s }) => (
                 <tr key={p.id} className={s.snaps < minPlays ? "short" : ""}>
                   <td><b>#{p.num}</b> {p.name}</td>
                   <td className="n">{s.off}</td><td className="n">{s.def}</td><td className="n">{s.st}</td>
                   <td className="n" style={{ color: s.snaps < minPlays ? "var(--stop)" : "var(--go)" }}>{s.snaps}</td>
+                  <td className="n">{s.pen}</td>
                 </tr>
               ))}
             </tbody>
@@ -1443,11 +1578,12 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
   const exportCsv = () => {
     const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds",
       "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds",
-      "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
+      "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU",
+      "Penalties", "PenYds", "TD", "Points"];
     const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0))
       .map((t) => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY,
         t.cmp, t.att, t.passY, t.kicks, t.kickY, t.ret, t.retY, t.fgm, t.fga, t.convM, t.convA,
-        t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.td, t.pts]);
+        t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.pen, t.penY, t.td, t.pts]);
     const csv = [head].concat(body).map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-season-" + (year === "all" ? "all" : year) + ".csv", csv, "text/csv");
   };
@@ -1511,13 +1647,13 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
 
           {view === "plays" && (
             <table>
-              <thead><tr><th>Player</th><th>GP</th><th>Off</th><th>Def</th><th>Spec</th><th>Total</th></tr></thead>
+              <thead><tr><th>Player</th><th>GP</th><th>Off</th><th>Def</th><th>Spec</th><th>Total</th><th>Pen</th></tr></thead>
               <tbody>
                 {totals.slice().sort((a, b) => b.snaps - a.snaps).map((t) => (
                   <tr key={t.id}>
                     <td><b>#{t.num}</b> {t.name}</td>
                     <td className="n">{t.gp}</td><td className="n">{t.off}</td><td className="n">{t.def}</td>
-                    <td className="n">{t.st}</td><td className="n">{t.snaps}</td>
+                    <td className="n">{t.st}</td><td className="n">{t.snaps}</td><td className="n">{t.pen}</td>
                   </tr>
                 ))}
               </tbody>
