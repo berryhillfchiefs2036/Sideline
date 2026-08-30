@@ -257,6 +257,12 @@ const type = (el, val) => {
   ok("schedule saved to localStorage",
     JSON.parse(store["sideline.solo.squad"]).schedule.length === 1);
 
+  console.log("\ntrack a scheduled game");
+  click(byText(".mini", "Add stats"));
+  await flush();
+  ok("jumped to the game board", !!$(".board"));
+  ok("board tagged with the scheduled opponent", $(".sl").textContent.indexOf("Tracking vs Bears") >= 0);
+
   console.log("\ndistance dropdown");
   click(byText(".nav button", "Game"));
   await flush();

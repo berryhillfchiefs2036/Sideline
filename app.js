@@ -832,6 +832,25 @@ function Sideline() {
       players
     });
   };
+  /* Tapping a scheduled game tags the live board with it: plays logged from
+     here on archive under that opponent and date. The tag is an op, so it
+     syncs to the whole crew and clears with the next board reset. */
+  const trackScheduled = g => {
+    const info = game.gameInfo || {};
+    if (game.plays.length > 0 && info.schedId !== g.id) {
+      if (!window.confirm("The board already has " + game.plays.length + " plays" + (info.opponent ? " (vs " + info.opponent + ")" : "") + ". OK tags them all as the " + (g.opponent || "scheduled") + " game — or Cancel and finish the other game first on the Stats tab.")) return;
+    }
+    addOp({
+      type: "set",
+      field: "gameInfo",
+      value: {
+        schedId: g.id,
+        opponent: g.opponent,
+        date: g.date
+      }
+    });
+    setTab("game");
+  };
   const lastUndoable = game.live.slice().reverse().find(o => ["play", "sub", "adj", "set"].indexOf(o.type) >= 0);
   const undo = () => {
     if (!lastUndoable) return;
@@ -899,7 +918,8 @@ function Sideline() {
     setSquad: setSquad,
     onEdit: S.editGame,
     onRemove: S.removeGame,
-    onImport: S.importGames
+    onImport: S.importGames,
+    onTrack: trackScheduled
   })), sheet && sheet.type === "play" && /*#__PURE__*/React.createElement(PlaySheet, {
     slot: sheet.slot,
     player: byId[sheet.slot.playerId],
@@ -1054,7 +1074,17 @@ function GameTab({
   }, game.distance, " yards to go")), /*#__PURE__*/React.createElement("button", {
     className: "chip",
     onClick: () => set("quarter", game.quarter % 4 + 1)
-  }, "Q", game.quarter))), /*#__PURE__*/React.createElement("div", {
+  }, "Q", game.quarter))), game.gameInfo && game.gameInfo.opponent && /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      textAlign: "center",
+      marginTop: 8
+    }
+  }, "Tracking vs ", game.gameInfo.opponent, game.gameInfo.date ? " · " + new Date(game.gameInfo.date + "T12:00:00").toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric"
+  }) : ""), /*#__PURE__*/React.createElement("div", {
     className: "units"
   }, UNITS.map(u => /*#__PURE__*/React.createElement("button", {
     key: u.key,
@@ -2107,8 +2137,9 @@ function StatsTab({
       const msg = code ? "End this game for all coaches? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put." : "End this game? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put.";
       if (!window.confirm(msg)) return;
       if (game.plays.length > 0) {
-        const opp = window.prompt("Who was this game against? (optional)", "") || "";
-        const when = window.prompt("What date was it played? (YYYY-MM-DD)", new Date().toISOString().slice(0, 10)) || "";
+        const info = game.gameInfo || {};
+        const opp = window.prompt("Who was this game against? (optional)", info.opponent || "") || "";
+        const when = window.prompt("What date was it played? (YYYY-MM-DD)", info.date || new Date().toISOString().slice(0, 10)) || "";
         onArchive(opp, when);
       }
       addOp({
@@ -2122,7 +2153,8 @@ function StatsTab({
 
 function ScheduleSection({
   squad,
-  setSquad
+  setSquad,
+  onTrack
 }) {
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
@@ -2229,6 +2261,9 @@ function ScheduleSection({
     }, "vs ", g.opponent), /*#__PURE__*/React.createElement("div", {
       className: "eyebrow"
     }, fmtDate(g.date), " \xB7 ", fmtTime(g.time), past ? " · played" : "")), /*#__PURE__*/React.createElement("button", {
+      className: "mini dark",
+      onClick: () => onTrack(g)
+    }, "Add stats"), /*#__PURE__*/React.createElement("button", {
       className: "mini",
       onClick: () => {
         if (window.confirm("Take this game off the schedule?")) remove(g.id);
@@ -2242,7 +2277,8 @@ function SeasonTab({
   setSquad,
   onEdit,
   onRemove,
-  onImport
+  onImport,
+  onTrack
 }) {
   const [year, setYear] = useState("all");
   const [view, setView] = useState("plays");
@@ -2306,7 +2342,8 @@ function SeasonTab({
     className: "eyebrow"
   }, shown.length, " ", shown.length === 1 ? "game" : "games", " \xB7 ", wins, "-", losses, ties ? "-" + ties : "")), /*#__PURE__*/React.createElement(ScheduleSection, {
     squad: squad,
-    setSquad: setSquad
+    setSquad: setSquad,
+    onTrack: onTrack
   }), years.length > 1 && /*#__PURE__*/React.createElement("div", {
     className: "stbar"
   }, /*#__PURE__*/React.createElement("button", {

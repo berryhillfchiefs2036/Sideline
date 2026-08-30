@@ -480,6 +480,20 @@ function Sideline() {
     S.archiveGame({ id: uid(), endedAt, opponent: opponent || "",
       us: game.us, them: game.them, playsCount: game.plays.length, plays: game.plays, players });
   };
+  /* Tapping a scheduled game tags the live board with it: plays logged from
+     here on archive under that opponent and date. The tag is an op, so it
+     syncs to the whole crew and clears with the next board reset. */
+  const trackScheduled = (g) => {
+    const info = game.gameInfo || {};
+    if (game.plays.length > 0 && info.schedId !== g.id) {
+      if (!window.confirm("The board already has " + game.plays.length + " plays" +
+        (info.opponent ? " (vs " + info.opponent + ")" : "") + ". OK tags them all as the " +
+        (g.opponent || "scheduled") + " game — or Cancel and finish the other game first on the Stats tab.")) return;
+    }
+    addOp({ type: "set", field: "gameInfo", value: { schedId: g.id, opponent: g.opponent, date: g.date } });
+    setTab("game");
+  };
+
   const lastUndoable = game.live.slice().reverse().find((o) => ["play", "sub", "adj", "set"].indexOf(o.type) >= 0);
   const undo = () => {
     if (!lastUndoable) return;
@@ -510,7 +524,7 @@ function Sideline() {
         {tab === "lineups" && <LineupsTab squad={squad} setSquad={setSquad} />}
         {tab === "stats" && <StatsTab {...{ roster, statOf, minPlays, game, addOp, code }} onArchive={archive} />}
         {tab === "season" && <SeasonTab games={S.games} squad={squad} setSquad={setSquad}
-          onEdit={S.editGame} onRemove={S.removeGame} onImport={S.importGames} />}
+          onEdit={S.editGame} onRemove={S.removeGame} onImport={S.importGames} onTrack={trackScheduled} />}
       </div>
 
       {sheet && sheet.type === "play" && (
@@ -592,6 +606,14 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
           <button className="chip" onClick={() => set("quarter", (game.quarter % 4) + 1)}>Q{game.quarter}</button>
         </div>
       </div>
+
+      {game.gameInfo && game.gameInfo.opponent && (
+        <div className="eyebrow" style={{ textAlign: "center", marginTop: 8 }}>
+          Tracking vs {game.gameInfo.opponent}
+          {game.gameInfo.date ? " · " + new Date(game.gameInfo.date + "T12:00:00")
+            .toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : ""}
+        </div>
+      )}
 
       <div className="units">
         {UNITS.map((u) => (
@@ -1211,9 +1233,10 @@ function StatsTab({ roster, statOf, minPlays, game, addOp, code, onArchive }) {
             : "End this game? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put.";
           if (!window.confirm(msg)) return;
           if (game.plays.length > 0) {
-            const opp = window.prompt("Who was this game against? (optional)", "") || "";
+            const info = game.gameInfo || {};
+            const opp = window.prompt("Who was this game against? (optional)", info.opponent || "") || "";
             const when = window.prompt("What date was it played? (YYYY-MM-DD)",
-              new Date().toISOString().slice(0, 10)) || "";
+              info.date || new Date().toISOString().slice(0, 10)) || "";
             onArchive(opp, when);
           }
           addOp({ type: "reset" });
@@ -1225,7 +1248,7 @@ function StatsTab({ roster, statOf, minPlays, game, addOp, code, onArchive }) {
 
 /* ============================ SEASON ============================ */
 
-function ScheduleSection({ squad, setSquad }) {
+function ScheduleSection({ squad, setSquad, onTrack }) {
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [opp, setOpp] = useState("");
@@ -1276,6 +1299,7 @@ function ScheduleSection({ squad, setSquad }) {
               <div style={{ fontWeight: 600, fontSize: 15 }}>vs {g.opponent}</div>
               <div className="eyebrow">{fmtDate(g.date)} · {fmtTime(g.time)}{past ? " · played" : ""}</div>
             </div>
+            <button className="mini dark" onClick={() => onTrack(g)}>Add stats</button>
             <button className="mini" onClick={() => {
               if (window.confirm("Take this game off the schedule?")) remove(g.id);
             }}>Remove</button>
@@ -1286,7 +1310,7 @@ function ScheduleSection({ squad, setSquad }) {
   );
 }
 
-function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport }) {
+function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack }) {
   const [year, setYear] = useState("all");
   const [view, setView] = useState("plays");
   const [editingGame, setEditingGame] = useState(null);
@@ -1352,7 +1376,7 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport }) {
       <div className="sechd"><div className="h2">Season</div>
         <div className="eyebrow">{shown.length} {shown.length === 1 ? "game" : "games"} · {wins}-{losses}{ties ? "-" + ties : ""}</div></div>
 
-      <ScheduleSection squad={squad} setSquad={setSquad} />
+      <ScheduleSection squad={squad} setSquad={setSquad} onTrack={onTrack} />
 
       {years.length > 1 && (
         <div className="stbar">
