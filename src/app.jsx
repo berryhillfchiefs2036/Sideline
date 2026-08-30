@@ -1405,6 +1405,8 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
   const wins = shown.filter((g) => g.us > g.them).length;
   const losses = shown.filter((g) => g.us < g.them).length;
   const ties = shown.length - wins - losses;
+  const pf = shown.reduce((a, g) => a + (g.us || 0), 0);
+  const pa = shown.reduce((a, g) => a + (g.them || 0), 0);
   const newest = shown.slice().sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1));
 
   const exportCsv = () => {
@@ -1439,7 +1441,16 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
   return (
     <React.Fragment>
       <div className="sechd"><div className="h2">Season</div>
-        <div className="eyebrow">{shown.length} {shown.length === 1 ? "game" : "games"} · {wins}-{losses}{ties ? "-" + ties : ""}</div></div>
+        <div className="eyebrow">{shown.length} {shown.length === 1 ? "game" : "games"}</div></div>
+
+      {shown.length > 0 && (
+        <div className="board" style={{ textAlign: "center", marginTop: 0 }}>
+          <div className="eyebrow" style={{ color: "#8FA394" }}>
+            {year === "all" ? "Team record — all years" : "Team record — " + year}</div>
+          <div className="dd-main">{wins}–{losses}{ties ? "–" + ties : ""}</div>
+          <div className="dd-sub">{pf} scored · {pa} allowed</div>
+        </div>
+      )}
 
       <ScheduleSection squad={squad} setSquad={setSquad} onTrack={onTrack} />
 

@@ -2412,6 +2412,8 @@ function SeasonTab({
   const wins = shown.filter(g => g.us > g.them).length;
   const losses = shown.filter(g => g.us < g.them).length;
   const ties = shown.length - wins - losses;
+  const pf = shown.reduce((a, g) => a + (g.us || 0), 0);
+  const pa = shown.reduce((a, g) => a + (g.them || 0), 0);
   const newest = shown.slice().sort((a, b) => a.endedAt < b.endedAt ? 1 : -1);
   const exportCsv = () => {
     const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
@@ -2443,7 +2445,22 @@ function SeasonTab({
     className: "h2"
   }, "Season"), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, shown.length, " ", shown.length === 1 ? "game" : "games", " \xB7 ", wins, "-", losses, ties ? "-" + ties : "")), /*#__PURE__*/React.createElement(ScheduleSection, {
+  }, shown.length, " ", shown.length === 1 ? "game" : "games")), shown.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "board",
+    style: {
+      textAlign: "center",
+      marginTop: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, year === "all" ? "Team record — all years" : "Team record — " + year), /*#__PURE__*/React.createElement("div", {
+    className: "dd-main"
+  }, wins, "\u2013", losses, ties ? "–" + ties : ""), /*#__PURE__*/React.createElement("div", {
+    className: "dd-sub"
+  }, pf, " scored \xB7 ", pa, " allowed")), /*#__PURE__*/React.createElement(ScheduleSection, {
     squad: squad,
     setSquad: setSquad,
     onTrack: onTrack

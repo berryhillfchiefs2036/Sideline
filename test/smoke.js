@@ -233,7 +233,9 @@ const type = (el, val) => {
   const gameRow = byText(".row", "vs Eagles");
   ok("archived game listed with the opponent", !!gameRow);
   ok("game recorded as a win", gameRow && gameRow.textContent.indexOf("W") >= 0);
-  ok("record shows 1-0", $(".sechd .eyebrow").textContent.indexOf("1-0") >= 0);
+  ok("record card shows 1-0", !!$(".dd-main") && $(".dd-main").textContent === "1–0");
+  ok("record card shows points for and against", $(".dd-sub").textContent.indexOf("6 scored") >= 0 &&
+    $(".dd-sub").textContent.indexOf("0 allowed") >= 0);
   const samRow = $$("tbody tr").find((r) => r.textContent.indexOf("Sam") >= 0);
   ok("season totals carry Sam's 2 snaps", samRow && samRow.querySelectorAll("td")[5].textContent === "2");
   const jordanRow = $$("tbody tr").find((r) => r.textContent.indexOf("Jordan") >= 0);
