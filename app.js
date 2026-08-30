@@ -3054,6 +3054,10 @@ function StatsTab({
     const y = p.yards || 0;
     return a + (p.action === "sack" || p.action === "tfl" ? -y : y);
   }, 0);
+  /* Return yards stay separate from rushing/passing AND from each other,
+     split by which return team was on the field. */
+  const teamKR = game.plays.reduce((a, p) => a + (!p.them && p.unit === "special" && p.action === "return" && (p.stKey === "kickReturn" || p.stKey === "kickoff") ? p.yards || 0 : 0), 0);
+  const teamPR = game.plays.reduce((a, p) => a + (!p.them && p.unit === "special" && p.action === "return" && (p.stKey === "puntReturn" || p.stKey === "punt") ? p.yards || 0 : 0), 0);
   const exportCsv = () => {
     const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "BlkKicks", "Fumbles", "FumLost", "Tackles", "Assists", "TFL", "Sacks", "LossYds", "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
     const body = rows.slice().sort((a, b) => (parseInt(a.p.num, 10) || 0) - (parseInt(b.p.num, 10) || 0)).map(({
@@ -3113,7 +3117,36 @@ function StatsTab({
     style: {
       fontSize: 28
     }
-  }, teamRush + teamPass)), /*#__PURE__*/React.createElement("div", {
+  }, teamRush + teamPass))), /*#__PURE__*/React.createElement("div", {
+    className: "board-top",
+    style: {
+      marginTop: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "KO ret yds"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, teamKR)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Punt ret yds"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, teamPR)), /*#__PURE__*/React.createElement("div", {
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",

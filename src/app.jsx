@@ -1714,6 +1714,12 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
     const y = p.yards || 0;
     return a + (p.action === "sack" || p.action === "tfl" ? -y : y);
   }, 0);
+  /* Return yards stay separate from rushing/passing AND from each other,
+     split by which return team was on the field. */
+  const teamKR = game.plays.reduce((a, p) => a + (!p.them && p.unit === "special" && p.action === "return"
+    && (p.stKey === "kickReturn" || p.stKey === "kickoff") ? p.yards || 0 : 0), 0);
+  const teamPR = game.plays.reduce((a, p) => a + (!p.them && p.unit === "special" && p.action === "return"
+    && (p.stKey === "puntReturn" || p.stKey === "punt") ? p.yards || 0 : 0), 0);
 
   const exportCsv = () => {
     const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds",
@@ -1744,6 +1750,16 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
           <div className="score-blk">
             <div className="eyebrow" style={{ color: "#8FA394" }}>Total off.</div>
             <div className="score-num" style={{ fontSize: 28 }}>{teamRush + teamPass}</div>
+          </div>
+        </div>
+        <div className="board-top" style={{ marginTop: 8 }}>
+          <div className="score-blk">
+            <div className="eyebrow" style={{ color: "#8FA394" }}>KO ret yds</div>
+            <div className="score-num" style={{ fontSize: 28 }}>{teamKR}</div>
+          </div>
+          <div className="score-blk">
+            <div className="eyebrow" style={{ color: "#8FA394" }}>Punt ret yds</div>
+            <div className="score-num" style={{ fontSize: 28 }}>{teamPR}</div>
           </div>
           <div className="score-blk">
             <div className="eyebrow" style={{ color: "#8FA394" }}>Allowed</div>

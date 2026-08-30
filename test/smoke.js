@@ -552,7 +552,7 @@ const type = (el, val) => {
   click(byText(".nav button", "Stats"));
   await flush();
   const teamNums = $$(".score-num").map((e) => e.textContent);
-  ok("yards allowed totals their gains minus their losses", teamNums[3] === "43");
+  ok("yards allowed totals their gains minus their losses", teamNums[5] === "43");
   click(byText(".nav button", "Game"));
   await flush();
 
@@ -570,7 +570,7 @@ const type = (el, val) => {
     $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("2nd & 8") >= 0);
   click(byText(".nav button", "Stats"));
   await flush();
-  ok("yards allowed recomputed after the edit", $$(".score-num")[3].textContent === "38");
+  ok("yards allowed recomputed after the edit", $$(".score-num")[5].textContent === "38");
   click(byText(".nav button", "Game"));
   await flush();
 
@@ -592,7 +592,7 @@ const type = (el, val) => {
   ok("punt logged with its distance", !!puntLine && puntLine.textContent.indexOf("30 yd") >= 0);
   click(byText(".nav button", "Stats"));
   await flush();
-  ok("punt yards don't count as yards allowed", $$(".score-num")[3].textContent === "38");
+  ok("punt yards don't count as yards allowed", $$(".score-num")[5].textContent === "38");
   click(byText(".nav button", "Game"));
   await flush();
 
@@ -618,6 +618,51 @@ const type = (el, val) => {
   await flush();
   const nicoRow = $$("tbody tr").find((r) => r.textContent.indexOf("Nico") >= 0);
   ok("blocked kick credited", nicoRow && nicoRow.querySelectorAll("td")[7].textContent === "1");
+  click(byText(".nav button", "Game"));
+  await flush();
+
+  console.log("\nreturn yards split by team");
+  click(byText(".unit", "Special"));
+  await flush();
+  click(byText(".stbar button", "Kick return"));
+  await flush();
+  click($$(".pcard.empty")[0].querySelector(".pc-top"));
+  await flush();
+  click($$(".sheet .row").find((r) => r.textContent.indexOf("Jordan") >= 0));
+  await flush();
+  click($$(".pcard").find((c) => c.textContent.indexOf("Jordan") >= 0).querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "Returned it"));
+  await flush();
+  const krSel = $(".yardbox select");
+  sSetter.call(krSel, "25");
+  krSel.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  click(byText(".stbar button", "Punt return"));
+  await flush();
+  click($$(".pcard.empty")[0].querySelector(".pc-top"));
+  await flush();
+  click($$(".sheet .row").find((r) => r.textContent.indexOf("Eli") >= 0));
+  await flush();
+  click($$(".pcard").find((c) => c.textContent.indexOf("Eli") >= 0).querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "Returned it"));
+  await flush();
+  const prSel = $(".yardbox select");
+  sSetter.call(prSel, "12");
+  prSel.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  click(byText(".nav button", "Stats"));
+  await flush();
+  const splitNums = $$(".score-num").map((e) => e.textContent);
+  ok("kick return yards total separately", splitNums[3] === "25");
+  ok("punt return yards total separately", splitNums[4] === "12");
+  ok("rushing total untouched by returns", splitNums[0] === "10");
+  ok("passing total untouched by returns", splitNums[1] === "15");
   click(byText(".nav button", "Game"));
   await flush();
 
