@@ -163,17 +163,22 @@ function fold(ops) {
     const sc = SCORES.find((x) => x.key === o.score);
     const pts = o.pts != null ? o.pts : sc ? sc.pts : 0;
     g.plays.push(Object.assign({}, o, { down: g.down, distance: g.distance, quarter: g.quarter }));
-    /* Ball-spot auto-tracking: logged yards always move the mark away from
-       our goal — offensive gains and kicks/returns go forward, offensive
-       losses go back (negative), and defensive plays log the yards the other
-       team lost, which pushes them back from our goal too. */
-    if (g.spot != null) g.spot = clampSpot(g.spot + (o.yards || 0));
+    /* Drive gain from this play: offense logs our gain directly; defense logs
+       the OTHER team's gain (sack/TFL yards are entered as yards lost, so
+       they count negative); special teams move the ball by the kick/return. */
+    const gained = o.unit === "defense"
+      ? (o.action === "sack" || o.action === "tfl" ? -(o.yards || 0) : o.yards || 0)
+      : o.yards || 0;
+    /* Ball-spot auto-tracking: our gains and kicks move the mark away from
+       our goal; the other team's gains (defense unit) move it toward us. */
+    if (g.spot != null) g.spot = clampSpot(g.spot + (o.unit === "defense" ? -gained : gained));
     if (pts > 0) {
-      const ours = o.unit !== "defense" || o.score === "td" || o.score === "safety";
+      /* o.them marks a score BY the other team (from the They-scored sheet);
+         otherwise a defensive TD or safety is ours (pick-six and the like). */
+      const ours = !o.them && (o.unit !== "defense" || o.score === "td" || o.score === "safety");
       if (ours) g.us += pts; else g.them += pts;
       g.down = 1; g.distance = 10;
     } else if (o.unit === "offense" || o.unit === "defense") {
-      const gained = o.unit === "offense" ? o.yards || 0 : -(o.yards || 0);
       const turnover = o.action === "int" || o.action === "fumrec" || o.action === "fumble";
       if (turnover) { g.down = 1; g.distance = 10; g.unit = o.unit === "offense" ? "defense" : "offense"; }
       else if (gained >= g.distance) { g.down = 1; g.distance = 10; }
@@ -658,6 +663,14 @@ function Sideline() {
         <SubSheet slot={sheet.slot} roster={roster} byId={byId} onField={onField} statOf={statOf}
           minPlays={minPlays} onClose={() => setSheet(null)}
           onPick={(pid) => { assign(sheet.slot, pid); setSheet(null); }} />)}
+      {sheet && sheet.type === "them" && (
+        <ThemSheet scores={scores} onClose={() => setSheet(null)}
+          onLog={({ score, pts, yards }) => {
+            addOp({ type: "play", unit: game.unit, stKey: game.unit === "special" ? game.stKey : null,
+              playerId: null, action: null, yards: yards || 0, passerId: null, them: true,
+              score, pts, snaps: fieldIds });
+            setSheet(null);
+          }} />)}
       {sheet && sheet.type === "spot" && (
         <SpotSheet spot={game.spot} onClose={() => setSheet(null)}
           onSet={(v) => { addOp({ type: "set", field: "spot", value: v }); setSheet(null); }} />)}
@@ -718,6 +731,7 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
             <div className="score-btns">
               <button className="tick" onClick={() => addOp({ type: "adj", team: "them", delta: -1 })}>−</button>
               <button className="tick" onClick={() => addOp({ type: "adj", team: "them", delta: 1 })}>+</button>
+              <button className="tick" style={{ width: 36 }} onClick={() => setSheet({ type: "them" })}>TD+</button>
             </div>
           </div>
         </div>
@@ -873,7 +887,8 @@ function PlayLog({ game, byId, addOp }) {
             <div className="logline" key={p.id}>
               <span className="eyebrow">{ORD[p.down]} &amp; {p.distance}</span>
               <span>
-                {pl ? <b>#{pl.num} {pl.name}</b> : <b>Whole unit</b>}{" "}
+                {pl ? <b>#{pl.num} {pl.name}</b> : <b>{p.them ? "Their team" : "Whole unit"}</b>}{" "}
+                {p.them && p.yards ? p.yards + " yd " : ""}
                 {VERB[p.action] || ""}{" "}
                 {["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : ""}
                 {["sack", "tfl"].indexOf(p.action) >= 0 && p.yards ? "−" + p.yards + " yd" : ""}
@@ -907,14 +922,18 @@ function PlaySheet({ slot, player, unit, onField, byId, scores, onClose, onLog }
   const qbSlot = (onField || []).find((s) => s.playerId && s.playerId !== (player && player.id) &&
     (s.label || "").toUpperCase().indexOf("QB") >= 0);
   const [passerId, setPasserId] = useState(qbSlot ? qbSlot.playerId : "");
-  const needsYards = ["rush", "catch", "pass", "return", "kick", "sack", "tfl", "fumkept"].indexOf(action) >= 0;
+  /* Defensive tackles/assists log the OTHER team's gain (or loss, negative)
+     so the game tracks yards allowed; sacks and TFLs ask for yards lost. */
+  const isDefGain = unit === "defense" && (action === "tackle" || action === "assist");
+  const needsYards = ["rush", "catch", "pass", "return", "kick", "sack", "tfl", "fumkept"].indexOf(action) >= 0
+    || isDefGain;
   const isPassPlay = unit === "offense" && (action === "catch" || action === "incomplete");
-  /* Sacks and tackles for loss ask for the yards LOST (entered positive). */
   const isLossPlay = action === "sack" || action === "tfl";
   if (!player) return null;
   const yardFace = isLossPlay ? (yards ? "−" + Math.abs(yards) : "0")
     : (yards > 0 ? "+" + yards : String(yards));
   const yardTone = isLossPlay ? (yards ? "loss" : "zero")
+    : isDefGain ? (yards > 0 ? "loss" : yards < 0 ? "gain" : "zero")
     : yards > 0 ? "gain" : yards < 0 ? "loss" : "zero";
   return (
     <div className="veil" onClick={onClose}>
@@ -937,7 +956,8 @@ function PlaySheet({ slot, player, unit, onField, byId, scores, onClose, onLog }
         </div>
         {needsYards && (
           <div className="yardbox">
-            <div className="eyebrow" style={{ textAlign: "center" }}>{isLossPlay ? "Yards they lost" : "Yards"}</div>
+            <div className="eyebrow" style={{ textAlign: "center" }}>
+              {isLossPlay ? "Yards they lost" : isDefGain ? "Their gain (− if they lost yards)" : "Yards"}</div>
             <div className={"yardnum " + yardTone}>{yardFace}</div>
             <select className="inp" aria-label="Yards on the play" value={yards} style={{ marginTop: 8 }}
               onChange={(e) => setYards(parseInt(e.target.value, 10))}>
@@ -1039,6 +1059,47 @@ function SubSheet({ slot, roster, byId, onField, statOf, minPlays, onClose, onPi
           <button className="abtn ghost" style={{ width: "100%", marginTop: 12 }} onClick={() => onPick(null)}>
             Leave this spot open</button>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ThemSheet({ scores, onClose, onLog }) {
+  const [score, setScore] = useState("td");
+  const [yards, setYards] = useState(0);
+  const list = scores.filter((s) => s.key !== "none");
+  return (
+    <div className="veil" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-hd">
+          <div>
+            <div className="sheet-ttl">They scored</div>
+            <div className="eyebrow">Counts a snap for the kids on the field</div>
+          </div>
+          <button className="close" onClick={onClose}>Cancel</button>
+        </div>
+        <div className="opts">
+          {list.map((s) => (
+            <button key={s.key} className={"opt" + (score === s.key ? " on" : "")} onClick={() => setScore(s.key)}>
+              <div className="opt-l">{s.label}</div><div className="opt-h">+{s.pts} for them</div>
+            </button>
+          ))}
+        </div>
+        {score === "td" && (
+          <React.Fragment>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>How long was the score?</div>
+            <select className="inp" aria-label="Their score length" value={yards}
+              onChange={(e) => setYards(parseInt(e.target.value, 10))}>
+              {Array.from({ length: 101 }, (_, i) => i).map((y) => (
+                <option key={y} value={y}>{y} {y === 1 ? "yard" : "yards"}</option>
+              ))}
+            </select>
+          </React.Fragment>
+        )}
+        <button className="confirm alt" onClick={() => {
+          const sc = list.find((x) => x.key === score);
+          onLog({ score, pts: sc ? sc.pts : 0, yards: score === "td" ? yards : 0 });
+        }}>Put it on their side</button>
       </div>
     </div>
   );
@@ -1445,6 +1506,14 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
     a + (p.unit === "offense" && p.action === "rush" ? p.yards || 0 : 0), 0);
   const teamPass = game.plays.reduce((a, p) =>
     a + (p.unit === "offense" && (p.action === "catch" || p.action === "pass") ? p.yards || 0 : 0), 0);
+  /* Yards the other team has gained against our defense (their losses count
+     back): tackles/assists log their gain, sacks and TFLs their loss, and
+     their scores carry the length of the play. */
+  const teamAllowed = game.plays.reduce((a, p) => {
+    if (p.type === "pen" || p.unit !== "defense") return a;
+    const y = p.yards || 0;
+    return a + (p.action === "sack" || p.action === "tfl" ? -y : y);
+  }, 0);
 
   const exportCsv = () => {
     const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds",
@@ -1475,6 +1544,10 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
           <div className="score-blk">
             <div className="eyebrow" style={{ color: "#8FA394" }}>Total off.</div>
             <div className="score-num" style={{ fontSize: 28 }}>{teamRush + teamPass}</div>
+          </div>
+          <div className="score-blk">
+            <div className="eyebrow" style={{ color: "#8FA394" }}>Allowed</div>
+            <div className="score-num" style={{ fontSize: 28 }}>{teamAllowed}</div>
           </div>
         </div>
       </div>

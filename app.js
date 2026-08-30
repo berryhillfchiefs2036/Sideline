@@ -385,18 +385,21 @@ function fold(ops) {
       distance: g.distance,
       quarter: g.quarter
     }));
-    /* Ball-spot auto-tracking: logged yards always move the mark away from
-       our goal — offensive gains and kicks/returns go forward, offensive
-       losses go back (negative), and defensive plays log the yards the other
-       team lost, which pushes them back from our goal too. */
-    if (g.spot != null) g.spot = clampSpot(g.spot + (o.yards || 0));
+    /* Drive gain from this play: offense logs our gain directly; defense logs
+       the OTHER team's gain (sack/TFL yards are entered as yards lost, so
+       they count negative); special teams move the ball by the kick/return. */
+    const gained = o.unit === "defense" ? o.action === "sack" || o.action === "tfl" ? -(o.yards || 0) : o.yards || 0 : o.yards || 0;
+    /* Ball-spot auto-tracking: our gains and kicks move the mark away from
+       our goal; the other team's gains (defense unit) move it toward us. */
+    if (g.spot != null) g.spot = clampSpot(g.spot + (o.unit === "defense" ? -gained : gained));
     if (pts > 0) {
-      const ours = o.unit !== "defense" || o.score === "td" || o.score === "safety";
+      /* o.them marks a score BY the other team (from the They-scored sheet);
+         otherwise a defensive TD or safety is ours (pick-six and the like). */
+      const ours = !o.them && (o.unit !== "defense" || o.score === "td" || o.score === "safety");
       if (ours) g.us += pts;else g.them += pts;
       g.down = 1;
       g.distance = 10;
     } else if (o.unit === "offense" || o.unit === "defense") {
-      const gained = o.unit === "offense" ? o.yards || 0 : -(o.yards || 0);
       const turnover = o.action === "int" || o.action === "fumrec" || o.action === "fumble";
       if (turnover) {
         g.down = 1;
@@ -1212,6 +1215,29 @@ function Sideline() {
       assign(sheet.slot, pid);
       setSheet(null);
     }
+  }), sheet && sheet.type === "them" && /*#__PURE__*/React.createElement(ThemSheet, {
+    scores: scores,
+    onClose: () => setSheet(null),
+    onLog: ({
+      score,
+      pts,
+      yards
+    }) => {
+      addOp({
+        type: "play",
+        unit: game.unit,
+        stKey: game.unit === "special" ? game.stKey : null,
+        playerId: null,
+        action: null,
+        yards: yards || 0,
+        passerId: null,
+        them: true,
+        score,
+        pts,
+        snaps: fieldIds
+      });
+      setSheet(null);
+    }
   }), sheet && sheet.type === "spot" && /*#__PURE__*/React.createElement(SpotSheet, {
     spot: game.spot,
     onClose: () => setSheet(null),
@@ -1347,7 +1373,15 @@ function GameTab({
       team: "them",
       delta: 1
     })
-  }, "+")))), /*#__PURE__*/React.createElement("div", {
+  }, "+"), /*#__PURE__*/React.createElement("button", {
+    className: "tick",
+    style: {
+      width: 36
+    },
+    onClick: () => setSheet({
+      type: "them"
+    })
+  }, "TD+")))), /*#__PURE__*/React.createElement("div", {
     className: "board-btm"
   }, [1, 2, 3, 4].map(d => /*#__PURE__*/React.createElement("button", {
     key: d,
@@ -1570,7 +1604,7 @@ function PlayLog({
       key: p.id
     }, /*#__PURE__*/React.createElement("span", {
       className: "eyebrow"
-    }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : /*#__PURE__*/React.createElement("b", null, "Whole unit"), " ", VERB[p.action] || "", " ", ["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : "", ["sack", "tfl"].indexOf(p.action) >= 0 && p.yards ? "−" + p.yards + " yd" : "", p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : "", sc && /*#__PURE__*/React.createElement("span", {
+    }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : /*#__PURE__*/React.createElement("b", null, p.them ? "Their team" : "Whole unit"), " ", p.them && p.yards ? p.yards + " yd " : "", VERB[p.action] || "", " ", ["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : "", ["sack", "tfl"].indexOf(p.action) >= 0 && p.yards ? "−" + p.yards + " yd" : "", p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : "", sc && /*#__PURE__*/React.createElement("span", {
       style: {
         color: "var(--stop)",
         fontWeight: 700
@@ -1616,13 +1650,15 @@ function PlaySheet({
      any other on-field player for a halfback pass or similar. */
   const qbSlot = (onField || []).find(s => s.playerId && s.playerId !== (player && player.id) && (s.label || "").toUpperCase().indexOf("QB") >= 0);
   const [passerId, setPasserId] = useState(qbSlot ? qbSlot.playerId : "");
-  const needsYards = ["rush", "catch", "pass", "return", "kick", "sack", "tfl", "fumkept"].indexOf(action) >= 0;
+  /* Defensive tackles/assists log the OTHER team's gain (or loss, negative)
+     so the game tracks yards allowed; sacks and TFLs ask for yards lost. */
+  const isDefGain = unit === "defense" && (action === "tackle" || action === "assist");
+  const needsYards = ["rush", "catch", "pass", "return", "kick", "sack", "tfl", "fumkept"].indexOf(action) >= 0 || isDefGain;
   const isPassPlay = unit === "offense" && (action === "catch" || action === "incomplete");
-  /* Sacks and tackles for loss ask for the yards LOST (entered positive). */
   const isLossPlay = action === "sack" || action === "tfl";
   if (!player) return null;
   const yardFace = isLossPlay ? yards ? "−" + Math.abs(yards) : "0" : yards > 0 ? "+" + yards : String(yards);
-  const yardTone = isLossPlay ? yards ? "loss" : "zero" : yards > 0 ? "gain" : yards < 0 ? "loss" : "zero";
+  const yardTone = isLossPlay ? yards ? "loss" : "zero" : isDefGain ? yards > 0 ? "loss" : yards < 0 ? "gain" : "zero" : yards > 0 ? "gain" : yards < 0 ? "loss" : "zero";
   return /*#__PURE__*/React.createElement("div", {
     className: "veil",
     onClick: onClose
@@ -1662,7 +1698,7 @@ function PlaySheet({
     style: {
       textAlign: "center"
     }
-  }, isLossPlay ? "Yards they lost" : "Yards"), /*#__PURE__*/React.createElement("div", {
+  }, isLossPlay ? "Yards they lost" : isDefGain ? "Their gain (− if they lost yards)" : "Yards"), /*#__PURE__*/React.createElement("div", {
     className: "yardnum " + yardTone
   }, yardFace), /*#__PURE__*/React.createElement("select", {
     className: "inp",
@@ -1842,6 +1878,66 @@ function SubSheet({
     },
     onClick: () => onPick(null)
   }, "Leave this spot open")));
+}
+function ThemSheet({
+  scores,
+  onClose,
+  onLog
+}) {
+  const [score, setScore] = useState("td");
+  const [yards, setYards] = useState(0);
+  const list = scores.filter(s => s.key !== "none");
+  return /*#__PURE__*/React.createElement("div", {
+    className: "veil",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sheet",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sheet-hd"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "sheet-ttl"
+  }, "They scored"), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, "Counts a snap for the kids on the field")), /*#__PURE__*/React.createElement("button", {
+    className: "close",
+    onClick: onClose
+  }, "Cancel")), /*#__PURE__*/React.createElement("div", {
+    className: "opts"
+  }, list.map(s => /*#__PURE__*/React.createElement("button", {
+    key: s.key,
+    className: "opt" + (score === s.key ? " on" : ""),
+    onClick: () => setScore(s.key)
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "opt-l"
+  }, s.label), /*#__PURE__*/React.createElement("div", {
+    className: "opt-h"
+  }, "+", s.pts, " for them")))), score === "td" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "How long was the score?"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Their score length",
+    value: yards,
+    onChange: e => setYards(parseInt(e.target.value, 10))
+  }, Array.from({
+    length: 101
+  }, (_, i) => i).map(y => /*#__PURE__*/React.createElement("option", {
+    key: y,
+    value: y
+  }, y, " ", y === 1 ? "yard" : "yards")))), /*#__PURE__*/React.createElement("button", {
+    className: "confirm alt",
+    onClick: () => {
+      const sc = list.find(x => x.key === score);
+      onLog({
+        score,
+        pts: sc ? sc.pts : 0,
+        yards: score === "td" ? yards : 0
+      });
+    }
+  }, "Put it on their side")));
 }
 function SpotSheet({
   spot,
@@ -2594,6 +2690,14 @@ function StatsTab({
   const short = plays.filter(r => r.s.snaps < minPlays);
   const teamRush = game.plays.reduce((a, p) => a + (p.unit === "offense" && p.action === "rush" ? p.yards || 0 : 0), 0);
   const teamPass = game.plays.reduce((a, p) => a + (p.unit === "offense" && (p.action === "catch" || p.action === "pass") ? p.yards || 0 : 0), 0);
+  /* Yards the other team has gained against our defense (their losses count
+     back): tackles/assists log their gain, sacks and TFLs their loss, and
+     their scores carry the length of the play. */
+  const teamAllowed = game.plays.reduce((a, p) => {
+    if (p.type === "pen" || p.unit !== "defense") return a;
+    const y = p.yards || 0;
+    return a + (p.action === "sack" || p.action === "tfl" ? -y : y);
+  }, 0);
   const exportCsv = () => {
     const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "Fumbles", "FumLost", "Tackles", "Assists", "TFL", "Sacks", "LossYds", "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
     const body = rows.slice().sort((a, b) => (parseInt(a.p.num, 10) || 0) - (parseInt(b.p.num, 10) || 0)).map(({
@@ -2653,7 +2757,19 @@ function StatsTab({
     style: {
       fontSize: 28
     }
-  }, teamRush + teamPass)))), /*#__PURE__*/React.createElement("div", {
+  }, teamRush + teamPass)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Allowed"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, teamAllowed)))), /*#__PURE__*/React.createElement("div", {
     className: "stbar"
   }, [["plays", "Play count"], ["off", "Offense"], ["def", "Defense"], ["st", "Special"]].map(v => /*#__PURE__*/React.createElement("button", {
     key: v[0],
