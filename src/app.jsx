@@ -20,6 +20,7 @@ const OFF_ACTIONS = [
   { key: "rush", label: "Ran it", hint: "carry" },
   { key: "catch", label: "Caught it", hint: "reception" },
   { key: "incomplete", label: "Incomplete pass", hint: "no catch" },
+  { key: "conv", label: "Conversion try", hint: "add the score if good" },
   { key: "fumble", label: "Fumbled", hint: "lost ball" },
 ];
 const DEF_ACTIONS = [
@@ -33,6 +34,8 @@ const DEF_ACTIONS = [
 const ST_ACTIONS = [
   { key: "kick", label: "Kicked it", hint: "kick / punt" },
   { key: "return", label: "Returned it", hint: "runback" },
+  { key: "fga", label: "FG attempt", hint: "add the score if good" },
+  { key: "conv", label: "Conversion try", hint: "add the score if good" },
   { key: "tackle", label: "Tackle", hint: "coverage" },
   { key: "fumrec", label: "Recovered", hint: "loose ball" },
 ];
@@ -59,7 +62,8 @@ const UNITS = [
   { key: "defense", label: "Defense" },
   { key: "special", label: "Special" },
 ];
-const VERB = { rush: "ran", catch: "caught", pass: "threw", incomplete: "incomplete pass", return: "returned", tackle: "tackle",
+const VERB = { rush: "ran", catch: "caught", pass: "threw", incomplete: "incomplete pass", return: "returned",
+  fga: "field goal attempt", conv: "conversion try", tackle: "tackle",
   assist: "assist", sack: "sack", int: "interception", fumrec: "recovery", pbu: "pass broken up",
   fumble: "fumble", team: "team play", kick: "kicked" };
 
@@ -118,7 +122,8 @@ function fold(ops) {
 }
 
 const blank = () => ({ snaps: 0, off: 0, def: 0, st: 0, rush: 0, rushY: 0, rec: 0, recY: 0,
-  cmp: 0, att: 0, passY: 0, tk: 0, ast: 0, sack: 0, int: 0, fr: 0, pbu: 0, td: 0, pts: 0 });
+  cmp: 0, att: 0, passY: 0, kicks: 0, kickY: 0, ret: 0, retY: 0, fgm: 0, fga: 0, convM: 0, convA: 0,
+  tk: 0, ast: 0, sack: 0, int: 0, fr: 0, pbu: 0, td: 0, pts: 0 });
 
 function tally(plays) {
   const m = {};
@@ -140,7 +145,14 @@ function tally(plays) {
     if (p.action === "rush") { s.rush++; s.rushY += y; }
     if (p.action === "catch") { s.rec++; s.recY += y; }
     if (p.action === "pass") { s.passY += y; s.cmp++; s.att++; }
-    if (p.action === "return") s.rushY += y;
+    if (p.action === "return") { s.ret++; s.retY += y; }
+    if (p.action === "kick") { s.kicks++; s.kickY += y; }
+    /* Explicit attempt actions cover missed tries; made tries logged as any
+       other action still count as attempts via their score below. */
+    if (p.action === "fga") s.fga++;
+    if (p.action === "conv") s.convA++;
+    if (p.score === "fg") { s.fgm++; if (p.action !== "fga") s.fga++; }
+    if (p.score === "pat" || p.score === "two") { s.convM++; if (p.action !== "conv") s.convA++; }
     if (p.action === "tackle") s.tk++;
     if (p.action === "assist") s.ast++;
     if (p.action === "sack") { s.sack++; s.tk++; }
@@ -761,7 +773,7 @@ function PlayLog({ game, byId, addOp }) {
               <span>
                 {pl ? <b>#{pl.num} {pl.name}</b> : <b>Whole unit</b>}{" "}
                 {VERB[p.action] || ""}{" "}
-                {["rush", "catch", "pass", "return"].indexOf(p.action) >= 0 ? p.yards + " yd" : ""}
+                {["rush", "catch", "pass", "return", "kick"].indexOf(p.action) >= 0 ? p.yards + " yd" : ""}
                 {p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : ""}
                 {sc && <span style={{ color: "var(--stop)", fontWeight: 700 }}> · {sc.label}</span>}
               </span>
@@ -1226,10 +1238,12 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
 
   const exportCsv = () => {
     const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds",
-      "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
+      "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds",
+      "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
     const body = rows.slice().sort((a, b) => (parseInt(a.p.num, 10) || 0) - (parseInt(b.p.num, 10) || 0))
       .map(({ p, s }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY,
-        s.cmp, s.att, s.passY, s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.td, s.pts]);
+        s.cmp, s.att, s.passY, s.kicks, s.kickY, s.ret, s.retY, s.fgm, s.fga, s.convM, s.convA,
+        s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.td, s.pts]);
     const csv = [head].concat(body).map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv");
   };
@@ -1238,7 +1252,7 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
     <React.Fragment>
       <div className="sechd"><div className="h2">Stats</div><div className="eyebrow">{game.plays.length} plays</div></div>
       <div className="stbar">
-        {[["plays", "Play count"], ["off", "Offense"], ["def", "Defense"]].map((v) => (
+        {[["plays", "Play count"], ["off", "Offense"], ["def", "Defense"], ["st", "Special"]].map((v) => (
           <button key={v[0]} className={view === v[0] ? "on" : ""} onClick={() => setView(v[0])}>{v[1]}</button>
         ))}
       </div>
@@ -1295,6 +1309,23 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
                 <td><b>#{p.num}</b> {p.name}</td>
                 <td className="n">{s.tk}</td><td className="n">{s.ast}</td><td className="n">{s.sack}</td>
                 <td className="n">{s.int}</td><td className="n">{s.fr}</td><td className="n">{s.pbu}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {view === "st" && (
+        <table>
+          <thead><tr><th>Player</th><th>Kicks</th><th>KYds</th><th>Ret</th><th>RYds</th><th>FG</th><th>Conv</th></tr></thead>
+          <tbody>
+            {rows.slice().sort((a, b) => (b.s.kickY + b.s.retY) - (a.s.kickY + a.s.retY)).map(({ p, s }) => (
+              <tr key={p.id}>
+                <td><b>#{p.num}</b> {p.name}</td>
+                <td className="n">{s.kicks}</td><td className="n">{s.kickY}</td>
+                <td className="n">{s.ret}</td><td className="n">{s.retY}</td>
+                <td className="n">{s.fga ? s.fgm + "/" + s.fga : "—"}</td>
+                <td className="n">{s.convA ? s.convM + "/" + s.convA : "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -1411,10 +1442,12 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
 
   const exportCsv = () => {
     const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds",
-      "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
+      "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds",
+      "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
     const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0))
       .map((t) => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY,
-        t.cmp, t.att, t.passY, t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.td, t.pts]);
+        t.cmp, t.att, t.passY, t.kicks, t.kickY, t.ret, t.retY, t.fgm, t.fga, t.convM, t.convA,
+        t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.td, t.pts]);
     const csv = [head].concat(body).map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-season-" + (year === "all" ? "all" : year) + ".csv", csv, "text/csv");
   };
@@ -1471,7 +1504,7 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
       ) : (
         <React.Fragment>
           <div className="stbar">
-            {[["plays", "Play count"], ["off", "Offense"], ["def", "Defense"]].map((v) => (
+            {[["plays", "Play count"], ["off", "Offense"], ["def", "Defense"], ["st", "Special"]].map((v) => (
               <button key={v[0]} className={view === v[0] ? "on" : ""} onClick={() => setView(v[0])}>{v[1]}</button>
             ))}
           </div>
@@ -1515,6 +1548,22 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
                     <td><b>#{t.num}</b> {t.name}</td>
                     <td className="n">{t.tk}</td><td className="n">{t.ast}</td><td className="n">{t.sack}</td>
                     <td className="n">{t.int}</td><td className="n">{t.fr}</td><td className="n">{t.pbu}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {view === "st" && (
+            <table>
+              <thead><tr><th>Player</th><th>Kicks</th><th>KYds</th><th>Ret</th><th>RYds</th><th>FG</th><th>Conv</th></tr></thead>
+              <tbody>
+                {totals.slice().sort((a, b) => (b.kickY + b.retY) - (a.kickY + a.retY)).map((t) => (
+                  <tr key={t.id}>
+                    <td><b>#{t.num}</b> {t.name}</td>
+                    <td className="n">{t.kicks}</td><td className="n">{t.kickY}</td>
+                    <td className="n">{t.ret}</td><td className="n">{t.retY}</td>
+                    <td className="n">{t.fga ? t.fgm + "/" + t.fga : "—"}</td>
+                    <td className="n">{t.convA ? t.convM + "/" + t.convA : "—"}</td>
                   </tr>
                 ))}
               </tbody>

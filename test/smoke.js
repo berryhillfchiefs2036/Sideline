@@ -360,6 +360,44 @@ const type = (el, val) => {
   await flush();
   ok("run conversion put 1 on the board", $$(".score-num")[0].textContent === "1");
 
+  console.log("\nspecial teams stats");
+  click(byText(".unit", "Special"));
+  await flush();
+  click($$(".pcard.empty")[0].querySelector(".pc-top"));
+  await flush();
+  click($$(".sheet .row").find((r) => r.textContent.indexOf("Jordan") >= 0));
+  await flush();
+  const kickCard = $$(".pcard").find((c) => c.textContent.indexOf("Jordan") >= 0);
+  ok("kicker subbed onto the kickoff team", !!kickCard);
+  click(kickCard.querySelector(".pc-top"));
+  await flush();
+  ok("FG attempt and conversion try are options", !!byText(".opt", "FG attempt") && !!byText(".opt", "Conversion try"));
+  click(byText(".opt", "Kicked it"));
+  await flush();
+  const kickSel = $(".yardbox select");
+  sSetter.call(kickSel, "35");
+  kickSel.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  click($$(".pcard").find((c) => c.textContent.indexOf("Jordan") >= 0).querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "FG attempt"));
+  click(byText(".opt", "Field goal"));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  click(byText(".nav button", "Stats"));
+  await flush();
+  click(byText(".stbar button", "Special"));
+  await flush();
+  const kickRow = $$("tbody tr").find((r) => r.textContent.indexOf("Jordan") >= 0);
+  ok("kick and kick yards credited", kickRow &&
+    kickRow.querySelectorAll("td")[1].textContent === "1" && kickRow.querySelectorAll("td")[2].textContent === "35");
+  ok("field goal counted made and attempted", kickRow && kickRow.querySelectorAll("td")[5].textContent === "1/1");
+  click(byText(".nav button", "Game"));
+  await flush();
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

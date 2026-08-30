@@ -49,6 +49,10 @@ const OFF_ACTIONS = [{
   label: "Incomplete pass",
   hint: "no catch"
 }, {
+  key: "conv",
+  label: "Conversion try",
+  hint: "add the score if good"
+}, {
   key: "fumble",
   label: "Fumbled",
   hint: "lost ball"
@@ -86,6 +90,14 @@ const ST_ACTIONS = [{
   key: "return",
   label: "Returned it",
   hint: "runback"
+}, {
+  key: "fga",
+  label: "FG attempt",
+  hint: "add the score if good"
+}, {
+  key: "conv",
+  label: "Conversion try",
+  hint: "add the score if good"
 }, {
   key: "tackle",
   label: "Tackle",
@@ -146,6 +158,8 @@ const VERB = {
   pass: "threw",
   incomplete: "incomplete pass",
   return: "returned",
+  fga: "field goal attempt",
+  conv: "conversion try",
   tackle: "tackle",
   assist: "assist",
   sack: "sack",
@@ -266,6 +280,14 @@ const blank = () => ({
   cmp: 0,
   att: 0,
   passY: 0,
+  kicks: 0,
+  kickY: 0,
+  ret: 0,
+  retY: 0,
+  fgm: 0,
+  fga: 0,
+  convM: 0,
+  convA: 0,
   tk: 0,
   ast: 0,
   sack: 0,
@@ -310,7 +332,26 @@ function tally(plays) {
       s.cmp++;
       s.att++;
     }
-    if (p.action === "return") s.rushY += y;
+    if (p.action === "return") {
+      s.ret++;
+      s.retY += y;
+    }
+    if (p.action === "kick") {
+      s.kicks++;
+      s.kickY += y;
+    }
+    /* Explicit attempt actions cover missed tries; made tries logged as any
+       other action still count as attempts via their score below. */
+    if (p.action === "fga") s.fga++;
+    if (p.action === "conv") s.convA++;
+    if (p.score === "fg") {
+      s.fgm++;
+      if (p.action !== "fga") s.fga++;
+    }
+    if (p.score === "pat" || p.score === "two") {
+      s.convM++;
+      if (p.action !== "conv") s.convA++;
+    }
     if (p.action === "tackle") s.tk++;
     if (p.action === "assist") s.ast++;
     if (p.action === "sack") {
@@ -1292,7 +1333,7 @@ function PlayLog({
       key: p.id
     }, /*#__PURE__*/React.createElement("span", {
       className: "eyebrow"
-    }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : /*#__PURE__*/React.createElement("b", null, "Whole unit"), " ", VERB[p.action] || "", " ", ["rush", "catch", "pass", "return"].indexOf(p.action) >= 0 ? p.yards + " yd" : "", p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : "", sc && /*#__PURE__*/React.createElement("span", {
+    }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : /*#__PURE__*/React.createElement("b", null, "Whole unit"), " ", VERB[p.action] || "", " ", ["rush", "catch", "pass", "return", "kick"].indexOf(p.action) >= 0 ? p.yards + " yd" : "", p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : "", sc && /*#__PURE__*/React.createElement("span", {
       style: {
         color: "var(--stop)",
         fontWeight: 700
@@ -2147,11 +2188,11 @@ function StatsTab({
   const plays = rows.slice().sort((a, b) => a.s.snaps - b.s.snaps);
   const short = plays.filter(r => r.s.snaps < minPlays);
   const exportCsv = () => {
-    const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
+    const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
     const body = rows.slice().sort((a, b) => (parseInt(a.p.num, 10) || 0) - (parseInt(b.p.num, 10) || 0)).map(({
       p,
       s
-    }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY, s.cmp, s.att, s.passY, s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.td, s.pts]);
+    }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY, s.cmp, s.att, s.passY, s.kicks, s.kickY, s.ret, s.retY, s.fgm, s.fga, s.convM, s.convA, s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.td, s.pts]);
     const csv = [head].concat(body).map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv");
   };
@@ -2163,7 +2204,7 @@ function StatsTab({
     className: "eyebrow"
   }, game.plays.length, " plays")), /*#__PURE__*/React.createElement("div", {
     className: "stbar"
-  }, [["plays", "Play count"], ["off", "Offense"], ["def", "Defense"]].map(v => /*#__PURE__*/React.createElement("button", {
+  }, [["plays", "Play count"], ["off", "Offense"], ["def", "Defense"], ["st", "Special"]].map(v => /*#__PURE__*/React.createElement("button", {
     key: v[0],
     className: view === v[0] ? "on" : "",
     onClick: () => setView(v[0])
@@ -2234,7 +2275,24 @@ function StatsTab({
     className: "n"
   }, s.fr), /*#__PURE__*/React.createElement("td", {
     className: "n"
-  }, s.pbu))))), /*#__PURE__*/React.createElement("div", {
+  }, s.pbu))))), view === "st" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Kicks"), /*#__PURE__*/React.createElement("th", null, "KYds"), /*#__PURE__*/React.createElement("th", null, "Ret"), /*#__PURE__*/React.createElement("th", null, "RYds"), /*#__PURE__*/React.createElement("th", null, "FG"), /*#__PURE__*/React.createElement("th", null, "Conv"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.kickY + b.s.retY - (a.s.kickY + a.s.retY)).map(({
+    p,
+    s
+  }) => /*#__PURE__*/React.createElement("tr", {
+    key: p.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", p.num), " ", p.name), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.kicks), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.kickY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.ret), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.retY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.fga ? s.fgm + "/" + s.fga : "—"), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.convA ? s.convM + "/" + s.convA : "—"))))), /*#__PURE__*/React.createElement("div", {
     className: "sechd"
   }, /*#__PURE__*/React.createElement("div", {
     className: "h2"
@@ -2416,8 +2474,8 @@ function SeasonTab({
   const pa = shown.reduce((a, g) => a + (g.them || 0), 0);
   const newest = shown.slice().sort((a, b) => a.endedAt < b.endedAt ? 1 : -1);
   const exportCsv = () => {
-    const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
-    const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0)).map(t => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY, t.cmp, t.att, t.passY, t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.td, t.pts]);
+    const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
+    const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0)).map(t => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY, t.cmp, t.att, t.passY, t.kicks, t.kickY, t.ret, t.retY, t.fgm, t.fga, t.convM, t.convA, t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.td, t.pts]);
     const csv = [head].concat(body).map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-season-" + (year === "all" ? "all" : year) + ".csv", csv, "text/csv");
   };
@@ -2477,7 +2535,7 @@ function SeasonTab({
     className: "empty-note"
   }, "No games saved yet. Finish a game and tap ", /*#__PURE__*/React.createElement("b", null, "Start a new game"), " on the Stats tab \u2014 it lands here automatically, and the totals below grow all season.") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "stbar"
-  }, [["plays", "Play count"], ["off", "Offense"], ["def", "Defense"]].map(v => /*#__PURE__*/React.createElement("button", {
+  }, [["plays", "Play count"], ["off", "Offense"], ["def", "Defense"], ["st", "Special"]].map(v => /*#__PURE__*/React.createElement("button", {
     key: v[0],
     className: view === v[0] ? "on" : "",
     onClick: () => setView(v[0])
@@ -2523,7 +2581,21 @@ function SeasonTab({
     className: "n"
   }, t.fr), /*#__PURE__*/React.createElement("td", {
     className: "n"
-  }, t.pbu))))), /*#__PURE__*/React.createElement("div", {
+  }, t.pbu))))), view === "st" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Kicks"), /*#__PURE__*/React.createElement("th", null, "KYds"), /*#__PURE__*/React.createElement("th", null, "Ret"), /*#__PURE__*/React.createElement("th", null, "RYds"), /*#__PURE__*/React.createElement("th", null, "FG"), /*#__PURE__*/React.createElement("th", null, "Conv"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.kickY + b.retY - (a.kickY + a.retY)).map(t => /*#__PURE__*/React.createElement("tr", {
+    key: t.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", t.num), " ", t.name), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.kicks), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.kickY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.ret), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.retY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.fga ? t.fgm + "/" + t.fga : "—"), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.convA ? t.convM + "/" + t.convA : "—"))))), /*#__PURE__*/React.createElement("div", {
     className: "sechd"
   }, /*#__PURE__*/React.createElement("div", {
     className: "h2"
