@@ -88,11 +88,21 @@ const type = (el, val) => {
   await flush();
   ok("starter saved", $$("select")[16].value === opt.value);
 
+  console.log("\nrename a position");
+  const slotInp = $$(".slot-inp")[0];
+  ok("position name is editable", !!slotInp && slotInp.value === "LT");
+  type(slotInp, "NOSE");
+  slotInp.dispatchEvent(new w.FocusEvent("focusout", { bubbles: true }));
+  await flush();
+  ok("rename saved in the lineup editor", $$(".slot-inp")[0].value === "NOSE");
+
   console.log("\ngame — logging a play");
   click(byText(".nav button", "Game"));
   await flush();
   const cards = $$(".pcard");
   ok("11 position cards on the field", cards.length === 11);
+  ok("renamed position shows on the field",
+    cards.some((c) => c.querySelector(".pc-slot").textContent === "NOSE"));
   const qbCard = cards.find((c) => c.textContent.indexOf("Jordan") >= 0);
   ok("QB card shows the starter", !!qbCard);
   click(qbCard.querySelector(".pc-top"));

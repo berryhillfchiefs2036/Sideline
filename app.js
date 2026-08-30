@@ -1695,6 +1695,29 @@ function RosterTab({
 
 /* ============================ LINEUPS ============================ */
 
+function SlotName({
+  label,
+  onSave
+}) {
+  const [v, setV] = useState(label);
+  useEffect(() => {
+    setV(label);
+  }, [label]);
+  const commit = () => {
+    const t = v.trim();
+    if (t && t !== label) onSave(t);else setV(label);
+  };
+  return /*#__PURE__*/React.createElement("input", {
+    className: "inp slot-inp",
+    value: v,
+    "aria-label": "Position name",
+    onChange: e => setV(e.target.value),
+    onBlur: commit,
+    onKeyDown: e => {
+      if (e.key === "Enter") e.target.blur();
+    }
+  });
+}
 function LineupsTab({
   squad,
   setSquad
@@ -1702,6 +1725,24 @@ function LineupsTab({
   const [unit, setUnit] = useState("offense");
   const [stKey, setStKey] = useState("kickoff");
   const slots = (unit === "special" ? squad.lineups.special[stKey] : squad.lineups[unit]) || [];
+  const defaultNames = unit === "special" ? SPECIAL_TEAMS[stKey].slots : unit === "offense" ? OFFENSE_SLOTS : DEFENSE_SLOTS;
+  const resetNames = () => {
+    if (!window.confirm("Put this unit's position names back to the defaults?")) return;
+    const relabel = arr => arr.map((s, i) => Object.assign({}, s, {
+      label: defaultNames[i] || s.label
+    }));
+    setSquad(s => unit === "special" ? Object.assign({}, s, {
+      lineups: Object.assign({}, s.lineups, {
+        special: Object.assign({}, s.lineups.special, {
+          [stKey]: relabel(s.lineups.special[stKey])
+        })
+      })
+    }) : Object.assign({}, s, {
+      lineups: Object.assign({}, s.lineups, {
+        [unit]: relabel(s.lineups[unit])
+      })
+    }));
+  };
   const update = (slotId, field, value) => {
     const edit = arr => arr.map(s => s.id === slotId ? Object.assign({}, s, {
       [field]: value || null
@@ -1746,14 +1787,10 @@ function LineupsTab({
       flexWrap: "wrap",
       gap: 8
     }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "plate",
-    style: {
-      minWidth: 58,
-      fontSize: 14,
-      letterSpacing: ".08em"
-    }
-  }, s.label), /*#__PURE__*/React.createElement("select", {
+  }, /*#__PURE__*/React.createElement(SlotName, {
+    label: s.label,
+    onSave: t => update(s.id, "label", t)
+  }), /*#__PURE__*/React.createElement("select", {
     className: "inp",
     style: {
       flex: 1,
@@ -1779,7 +1816,15 @@ function LineupsTab({
   }, "Sub\u2026"), squad.roster.map(p => /*#__PURE__*/React.createElement("option", {
     key: p.id,
     value: p.id
-  }, "#", p.num, " ", p.name))))), /*#__PURE__*/React.createElement("div", {
+  }, "#", p.num, " ", p.name))))), squad.roster.length > 0 && /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    style: {
+      width: "100%",
+      padding: 10,
+      marginTop: 2
+    },
+    onClick: resetNames
+  }, "Reset this unit's position names"), /*#__PURE__*/React.createElement("div", {
     style: {
       height: 8
     }
@@ -1788,7 +1833,7 @@ function LineupsTab({
     style: {
       textAlign: "left"
     }
-  }, "These are starting points, not rules. During the game ", /*#__PURE__*/React.createElement("b", null, "Sub"), " opens the whole roster for that spot, and", /*#__PURE__*/React.createElement("b", null, " Move"), " picks a player up so you can drop them anywhere on the field."));
+  }, "These are starting points, not rules. Tap a position's name to rename it \u2014 call the spots whatever your playbook calls them. During the game ", /*#__PURE__*/React.createElement("b", null, "Sub"), " opens the whole roster for that spot, and", /*#__PURE__*/React.createElement("b", null, " Move"), " picks a player up so you can drop them anywhere on the field."));
 }
 
 /* ============================ STATS ============================ */
