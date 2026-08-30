@@ -325,14 +325,20 @@ const BASE = () => ({
 
 function fold(ops) {
   const revoked = new Set();
+  const amends = {};
   ops.forEach(o => {
     if (o.type === "undo") (o.targets || [o.target]).forEach(t => revoked.add(t));
+    /* Edits to past plays are amend ops: patches applied to the target play
+       when the game replays, so every board and stat recomputes. Later
+       amends layer over earlier ones in time order. */
+    if (o.type === "amend" && o.target) amends[o.target] = Object.assign({}, amends[o.target], o.patch);
   });
-  let live = ops.filter(o => o.type !== "undo" && !revoked.has(o.id));
+  let live = ops.filter(o => o.type !== "undo" && o.type !== "amend" && !revoked.has(o.id));
   const lastReset = live.map(o => o.type).lastIndexOf("reset");
   if (lastReset >= 0) live = live.slice(lastReset + 1);
   const g = BASE();
   live.forEach(o => {
+    if (amends[o.id]) o = Object.assign({}, o, amends[o.id]);
     if (o.type === "set") {
       g[o.field] = o.value;
       return;
@@ -1215,6 +1221,19 @@ function Sideline() {
       assign(sheet.slot, pid);
       setSheet(null);
     }
+  }), sheet && sheet.type === "editplay" && /*#__PURE__*/React.createElement(EditPlaySheet, {
+    play: sheet.play,
+    roster: roster,
+    scores: scores,
+    onClose: () => setSheet(null),
+    onSave: patch => {
+      addOp({
+        type: "amend",
+        target: sheet.play.id,
+        patch
+      });
+      setSheet(null);
+    }
   }), sheet && sheet.type === "them" && /*#__PURE__*/React.createElement(ThemSheet, {
     scores: scores,
     onClose: () => setSheet(null),
@@ -1522,7 +1541,11 @@ function GameTab({
   }, "Undo")), /*#__PURE__*/React.createElement(PlayLog, {
     game: game,
     byId: byId,
-    addOp: addOp
+    addOp: addOp,
+    onEdit: p => setSheet({
+      type: "editplay",
+      play: p
+    })
   }), game.plays.length > 0 && /*#__PURE__*/React.createElement("button", {
     className: "abtn",
     style: {
@@ -1556,7 +1579,8 @@ function Chain({
 function PlayLog({
   game,
   byId,
-  addOp
+  addOp,
+  onEdit
 }) {
   const recent = game.plays.slice(-14).reverse();
   if (!recent.length) return null;
@@ -1587,6 +1611,14 @@ function PlayLog({
           flex: "0 0 auto",
           padding: "2px 8px"
         },
+        "aria-label": "Edit this play",
+        onClick: () => onEdit(p)
+      }, "\u270E"), /*#__PURE__*/React.createElement("button", {
+        className: "mini",
+        style: {
+          flex: "0 0 auto",
+          padding: "2px 8px"
+        },
         "aria-label": "Remove this penalty",
         onClick: () => {
           if (window.confirm("Take this penalty out? The down and distance recalculate without it.")) {
@@ -1612,6 +1644,14 @@ function PlayLog({
     }, " \xB7 ", sc.label)), /*#__PURE__*/React.createElement("span", {
       className: "who"
     }, p.byName || ""), /*#__PURE__*/React.createElement("button", {
+      className: "mini",
+      style: {
+        flex: "0 0 auto",
+        padding: "2px 8px"
+      },
+      "aria-label": "Edit this play",
+      onClick: () => onEdit(p)
+    }, "\u270E"), /*#__PURE__*/React.createElement("button", {
       className: "mini",
       style: {
         flex: "0 0 auto",
@@ -1878,6 +1918,244 @@ function SubSheet({
     },
     onClick: () => onPick(null)
   }, "Leave this spot open")));
+}
+function EditPlaySheet({
+  play,
+  roster,
+  scores,
+  onSave,
+  onClose
+}) {
+  const isPen = play.type === "pen";
+  const isThem = !!play.them;
+  const [playerId, setPlayerId] = useState(play.playerId || "");
+  const [action, setAction] = useState(play.action || "team");
+  const [yards, setYards] = useState(play.yards || 0);
+  const [score, setScore] = useState(play.score || "none");
+  const [passerId, setPasserId] = useState(play.passerId || "");
+  const [kind, setKind] = useState(play.kind || "other");
+  const [side, setSide] = useState(play.side || "offense");
+  const [who, setWho] = useState(isPen ? play.playerId ? play.playerId : play.ours ? "us" : "them" : "them");
+  const actList = (play.unit === "offense" ? OFF_ACTIONS : play.unit === "defense" ? DEF_ACTIONS : ST_ACTIONS).concat([{
+    key: "team",
+    label: "Snap, no stat"
+  }]);
+  const isLoss = action === "sack" || action === "tfl";
+  const isPass = play.unit === "offense" && (action === "catch" || action === "incomplete");
+  const save = () => {
+    if (isPen) {
+      onSave({
+        playerId: who !== "them" && who !== "us" ? who : null,
+        ours: who !== "them",
+        kind,
+        side,
+        yards: parseInt(yards, 10) || 0
+      });
+    } else if (isThem) {
+      onSave({
+        score,
+        pts: (scores.find(x => x.key === score) || {}).pts || 0,
+        yards: score === "td" ? parseInt(yards, 10) || 0 : 0
+      });
+    } else {
+      onSave({
+        playerId: playerId || null,
+        action: action || null,
+        yards: isLoss ? Math.abs(parseInt(yards, 10) || 0) : parseInt(yards, 10) || 0,
+        score: score !== "none" ? score : null,
+        pts: score !== "none" ? (scores.find(x => x.key === score) || {}).pts || 0 : null,
+        passerId: isPass ? passerId || null : null
+      });
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "veil",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sheet",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sheet-hd"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "sheet-ttl"
+  }, isPen ? "Edit penalty" : isThem ? "Edit their score" : "Edit play"), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, "Everything recomputes when you save")), /*#__PURE__*/React.createElement("button", {
+    className: "close",
+    onClick: onClose
+  }, "Cancel")), isPen && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      marginBottom: 6
+    }
+  }, "Who was flagged"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Who was flagged",
+    value: who,
+    onChange: e => setWho(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "them"
+  }, "The other team"), /*#__PURE__*/React.createElement("option", {
+    value: "us"
+  }, "Us \u2014 no one in particular"), roster.map(p => /*#__PURE__*/React.createElement("option", {
+    key: p.id,
+    value: p.id
+  }, "#", p.num, " ", p.name))), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "The call"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Penalty type",
+    value: kind,
+    onChange: e => setKind(e.target.value)
+  }, PENALTIES.map(x => /*#__PURE__*/React.createElement("option", {
+    key: x.key,
+    value: x.key
+  }, x.label, " (", x.yds, ")"))), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "Yards walked off"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Penalty yards",
+    value: yards,
+    onChange: e => setYards(parseInt(e.target.value, 10))
+  }, Array.from({
+    length: 50
+  }, (_, i) => i + 1).map(y => /*#__PURE__*/React.createElement("option", {
+    key: y,
+    value: y
+  }, y, " ", y === 1 ? "yard" : "yards"))), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "Enforced against"), /*#__PURE__*/React.createElement("div", {
+    className: "opts"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "opt" + (side === "offense" ? " on" : ""),
+    onClick: () => setSide("offense")
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "opt-l"
+  }, "The ball side"), /*#__PURE__*/React.createElement("div", {
+    className: "opt-h"
+  }, "backs up \xB7 replay the down")), /*#__PURE__*/React.createElement("button", {
+    className: "opt" + (side === "defense" ? " on" : ""),
+    onClick: () => setSide("defense")
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "opt-l"
+  }, "The defending side"), /*#__PURE__*/React.createElement("div", {
+    className: "opt-h"
+  }, "chains move up")))), isThem && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      marginBottom: 6
+    }
+  }, "What they scored"), /*#__PURE__*/React.createElement("div", {
+    className: "opts"
+  }, scores.filter(s => s.key !== "none").map(s => /*#__PURE__*/React.createElement("button", {
+    key: s.key,
+    className: "opt" + (score === s.key ? " on" : ""),
+    onClick: () => setScore(s.key)
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "opt-l"
+  }, s.label), /*#__PURE__*/React.createElement("div", {
+    className: "opt-h"
+  }, "+", s.pts, " for them")))), score === "td" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "How long was the score?"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Their score length",
+    value: yards,
+    onChange: e => setYards(parseInt(e.target.value, 10))
+  }, Array.from({
+    length: 101
+  }, (_, i) => i).map(y => /*#__PURE__*/React.createElement("option", {
+    key: y,
+    value: y
+  }, y, " ", y === 1 ? "yard" : "yards"))))), !isPen && !isThem && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      marginBottom: 6
+    }
+  }, "Player"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Player",
+    value: playerId,
+    onChange: e => setPlayerId(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Whole unit"), roster.map(p => /*#__PURE__*/React.createElement("option", {
+    key: p.id,
+    value: p.id
+  }, "#", p.num, " ", p.name))), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "What happened"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "What happened",
+    value: action,
+    onChange: e => setAction(e.target.value)
+  }, actList.map(a => /*#__PURE__*/React.createElement("option", {
+    key: a.key,
+    value: a.key
+  }, a.label))), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, isLoss ? "Yards they lost" : "Yards"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Yards",
+    value: yards,
+    onChange: e => setYards(parseInt(e.target.value, 10))
+  }, (isLoss ? Array.from({
+    length: 31
+  }, (_, i) => i) : Array.from({
+    length: 201
+  }, (_, i) => i - 100)).map(y => /*#__PURE__*/React.createElement("option", {
+    key: y,
+    value: y
+  }, isLoss ? y + (y === 1 ? " yard lost" : " yards lost") : (y > 0 ? "+" + y : y) + (Math.abs(y) === 1 ? " yard" : " yards")))), isPass && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "Who threw it"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Who threw it",
+    value: passerId,
+    onChange: e => setPasserId(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "No passer / not sure"), roster.map(p => /*#__PURE__*/React.createElement("option", {
+    key: p.id,
+    value: p.id
+  }, "#", p.num, " ", p.name)))), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "Points on the play"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Points on the play",
+    value: score,
+    onChange: e => setScore(e.target.value)
+  }, scores.map(s => /*#__PURE__*/React.createElement("option", {
+    key: s.key,
+    value: s.key
+  }, s.label, s.pts ? " (+" + s.pts + ")" : "")))), /*#__PURE__*/React.createElement("button", {
+    className: "confirm",
+    onClick: save
+  }, "Save the fix")));
 }
 function ThemSheet({
   scores,

@@ -120,15 +120,21 @@ const BASE = () => ({ quarter: 1, us: 0, them: 0, down: 1, distance: 10, unit: "
 
 function fold(ops) {
   const revoked = new Set();
+  const amends = {};
   ops.forEach((o) => {
     if (o.type === "undo") (o.targets || [o.target]).forEach((t) => revoked.add(t));
+    /* Edits to past plays are amend ops: patches applied to the target play
+       when the game replays, so every board and stat recomputes. Later
+       amends layer over earlier ones in time order. */
+    if (o.type === "amend" && o.target) amends[o.target] = Object.assign({}, amends[o.target], o.patch);
   });
-  let live = ops.filter((o) => o.type !== "undo" && !revoked.has(o.id));
+  let live = ops.filter((o) => o.type !== "undo" && o.type !== "amend" && !revoked.has(o.id));
   const lastReset = live.map((o) => o.type).lastIndexOf("reset");
   if (lastReset >= 0) live = live.slice(lastReset + 1);
 
   const g = BASE();
   live.forEach((o) => {
+    if (amends[o.id]) o = Object.assign({}, o, amends[o.id]);
     if (o.type === "set") { g[o.field] = o.value; return; }
     if (o.type === "adj") { g[o.team] = Math.max(0, g[o.team] + o.delta); return; }
     if (o.type === "sub") {
@@ -663,6 +669,10 @@ function Sideline() {
         <SubSheet slot={sheet.slot} roster={roster} byId={byId} onField={onField} statOf={statOf}
           minPlays={minPlays} onClose={() => setSheet(null)}
           onPick={(pid) => { assign(sheet.slot, pid); setSheet(null); }} />)}
+      {sheet && sheet.type === "editplay" && (
+        <EditPlaySheet play={sheet.play} roster={roster} scores={scores}
+          onClose={() => setSheet(null)}
+          onSave={(patch) => { addOp({ type: "amend", target: sheet.play.id, patch }); setSheet(null); }} />)}
       {sheet && sheet.type === "them" && (
         <ThemSheet scores={scores} onClose={() => setSheet(null)}
           onLog={({ score, pts, yards }) => {
@@ -831,7 +841,8 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
         <button className="abtn ghost" disabled={!canUndo} onClick={undo}>Undo</button>
       </div>
 
-      <PlayLog game={game} byId={byId} addOp={addOp} />
+      <PlayLog game={game} byId={byId} addOp={addOp}
+        onEdit={(p) => setSheet({ type: "editplay", play: p })} />
       {game.plays.length > 0 && (
         <button className="abtn" style={{ width: "100%", marginTop: 12 }} onClick={onEndGame}>
           End game — save it to the Season</button>
@@ -853,7 +864,7 @@ function Chain({ count, min }) {
   );
 }
 
-function PlayLog({ game, byId, addOp }) {
+function PlayLog({ game, byId, addOp, onEdit }) {
   const recent = game.plays.slice(-14).reverse();
   if (!recent.length) return null;
   return (
@@ -873,6 +884,8 @@ function PlayLog({ game, byId, addOp }) {
                   {" — "}{pk ? pk.label : "penalty"}, {p.yards} yd
                 </span>
                 <span className="who">{p.byName || ""}</span>
+                <button className="mini" style={{ flex: "0 0 auto", padding: "2px 8px" }}
+                  aria-label="Edit this play" onClick={() => onEdit(p)}>✎</button>
                 <button className="mini" style={{ flex: "0 0 auto", padding: "2px 8px" }}
                   aria-label="Remove this penalty" onClick={() => {
                     if (window.confirm("Take this penalty out? The down and distance recalculate without it.")) {
@@ -896,6 +909,8 @@ function PlayLog({ game, byId, addOp }) {
                 {sc && <span style={{ color: "var(--stop)", fontWeight: 700 }}> · {sc.label}</span>}
               </span>
               <span className="who">{p.byName || ""}</span>
+              <button className="mini" style={{ flex: "0 0 auto", padding: "2px 8px" }}
+                aria-label="Edit this play" onClick={() => onEdit(p)}>✎</button>
               <button className="mini" style={{ flex: "0 0 auto", padding: "2px 8px" }}
                 aria-label="Remove this play" onClick={() => {
                   if (window.confirm("Take this play out? The score, down, and stats recalculate without it — you can re-log it right.")) {
@@ -1059,6 +1074,148 @@ function SubSheet({ slot, roster, byId, onField, statOf, minPlays, onClose, onPi
           <button className="abtn ghost" style={{ width: "100%", marginTop: 12 }} onClick={() => onPick(null)}>
             Leave this spot open</button>
         )}
+      </div>
+    </div>
+  );
+}
+
+function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
+  const isPen = play.type === "pen";
+  const isThem = !!play.them;
+  const [playerId, setPlayerId] = useState(play.playerId || "");
+  const [action, setAction] = useState(play.action || "team");
+  const [yards, setYards] = useState(play.yards || 0);
+  const [score, setScore] = useState(play.score || "none");
+  const [passerId, setPasserId] = useState(play.passerId || "");
+  const [kind, setKind] = useState(play.kind || "other");
+  const [side, setSide] = useState(play.side || "offense");
+  const [who, setWho] = useState(isPen ? (play.playerId ? play.playerId : play.ours ? "us" : "them") : "them");
+  const actList = (play.unit === "offense" ? OFF_ACTIONS : play.unit === "defense" ? DEF_ACTIONS : ST_ACTIONS)
+    .concat([{ key: "team", label: "Snap, no stat" }]);
+  const isLoss = action === "sack" || action === "tfl";
+  const isPass = play.unit === "offense" && (action === "catch" || action === "incomplete");
+
+  const save = () => {
+    if (isPen) {
+      onSave({ playerId: who !== "them" && who !== "us" ? who : null, ours: who !== "them",
+        kind, side, yards: parseInt(yards, 10) || 0 });
+    } else if (isThem) {
+      onSave({ score, pts: ((scores.find((x) => x.key === score)) || {}).pts || 0,
+        yards: score === "td" ? parseInt(yards, 10) || 0 : 0 });
+    } else {
+      onSave({ playerId: playerId || null, action: action || null,
+        yards: isLoss ? Math.abs(parseInt(yards, 10) || 0) : parseInt(yards, 10) || 0,
+        score: score !== "none" ? score : null,
+        pts: score !== "none" ? ((scores.find((x) => x.key === score)) || {}).pts || 0 : null,
+        passerId: isPass ? passerId || null : null });
+    }
+  };
+
+  return (
+    <div className="veil" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-hd">
+          <div>
+            <div className="sheet-ttl">{isPen ? "Edit penalty" : isThem ? "Edit their score" : "Edit play"}</div>
+            <div className="eyebrow">Everything recomputes when you save</div>
+          </div>
+          <button className="close" onClick={onClose}>Cancel</button>
+        </div>
+
+        {isPen && (
+          <React.Fragment>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>Who was flagged</div>
+            <select className="inp" aria-label="Who was flagged" value={who} onChange={(e) => setWho(e.target.value)}>
+              <option value="them">The other team</option>
+              <option value="us">Us — no one in particular</option>
+              {roster.map((p) => <option key={p.id} value={p.id}>#{p.num} {p.name}</option>)}
+            </select>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>The call</div>
+            <select className="inp" aria-label="Penalty type" value={kind} onChange={(e) => setKind(e.target.value)}>
+              {PENALTIES.map((x) => <option key={x.key} value={x.key}>{x.label} ({x.yds})</option>)}
+            </select>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Yards walked off</div>
+            <select className="inp" aria-label="Penalty yards" value={yards}
+              onChange={(e) => setYards(parseInt(e.target.value, 10))}>
+              {Array.from({ length: 50 }, (_, i) => i + 1).map((y) => (
+                <option key={y} value={y}>{y} {y === 1 ? "yard" : "yards"}</option>
+              ))}
+            </select>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Enforced against</div>
+            <div className="opts">
+              <button className={"opt" + (side === "offense" ? " on" : "")} onClick={() => setSide("offense")}>
+                <div className="opt-l">The ball side</div><div className="opt-h">backs up · replay the down</div></button>
+              <button className={"opt" + (side === "defense" ? " on" : "")} onClick={() => setSide("defense")}>
+                <div className="opt-l">The defending side</div><div className="opt-h">chains move up</div></button>
+            </div>
+          </React.Fragment>
+        )}
+
+        {isThem && (
+          <React.Fragment>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>What they scored</div>
+            <div className="opts">
+              {scores.filter((s) => s.key !== "none").map((s) => (
+                <button key={s.key} className={"opt" + (score === s.key ? " on" : "")} onClick={() => setScore(s.key)}>
+                  <div className="opt-l">{s.label}</div><div className="opt-h">+{s.pts} for them</div>
+                </button>
+              ))}
+            </div>
+            {score === "td" && (
+              <React.Fragment>
+                <div className="eyebrow" style={{ margin: "12px 0 6px" }}>How long was the score?</div>
+                <select className="inp" aria-label="Their score length" value={yards}
+                  onChange={(e) => setYards(parseInt(e.target.value, 10))}>
+                  {Array.from({ length: 101 }, (_, i) => i).map((y) => (
+                    <option key={y} value={y}>{y} {y === 1 ? "yard" : "yards"}</option>
+                  ))}
+                </select>
+              </React.Fragment>
+            )}
+          </React.Fragment>
+        )}
+
+        {!isPen && !isThem && (
+          <React.Fragment>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>Player</div>
+            <select className="inp" aria-label="Player" value={playerId} onChange={(e) => setPlayerId(e.target.value)}>
+              <option value="">Whole unit</option>
+              {roster.map((p) => <option key={p.id} value={p.id}>#{p.num} {p.name}</option>)}
+            </select>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>What happened</div>
+            <select className="inp" aria-label="What happened" value={action} onChange={(e) => setAction(e.target.value)}>
+              {actList.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+            </select>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>
+              {isLoss ? "Yards they lost" : "Yards"}</div>
+            <select className="inp" aria-label="Yards" value={yards}
+              onChange={(e) => setYards(parseInt(e.target.value, 10))}>
+              {(isLoss ? Array.from({ length: 31 }, (_, i) => i)
+                : Array.from({ length: 201 }, (_, i) => i - 100)).map((y) => (
+                <option key={y} value={y}>{isLoss
+                  ? y + (y === 1 ? " yard lost" : " yards lost")
+                  : (y > 0 ? "+" + y : y) + (Math.abs(y) === 1 ? " yard" : " yards")}</option>
+              ))}
+            </select>
+            {isPass && (
+              <React.Fragment>
+                <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Who threw it</div>
+                <select className="inp" aria-label="Who threw it" value={passerId}
+                  onChange={(e) => setPasserId(e.target.value)}>
+                  <option value="">No passer / not sure</option>
+                  {roster.map((p) => <option key={p.id} value={p.id}>#{p.num} {p.name}</option>)}
+                </select>
+              </React.Fragment>
+            )}
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Points on the play</div>
+            <select className="inp" aria-label="Points on the play" value={score}
+              onChange={(e) => setScore(e.target.value)}>
+              {scores.map((s) => <option key={s.key} value={s.key}>{s.label}{s.pts ? " (+" + s.pts + ")" : ""}</option>)}
+            </select>
+          </React.Fragment>
+        )}
+
+        <button className="confirm" onClick={save}>Save the fix</button>
       </div>
     </div>
   );

@@ -192,7 +192,7 @@ const type = (el, val) => {
     $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("2nd & 9") >= 0);
 
   console.log("\nremove a logged play");
-  click($(".logline .mini"));
+  click($(".logline [aria-label='Remove this play']"));
   await flush();
   ok("removed play rewinds the down", $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("1st & 10") >= 0);
   ok("play counter went back down", $(".dd-sub").textContent.indexOf("1 plays") >= 0);
@@ -553,6 +553,24 @@ const type = (el, val) => {
   await flush();
   const teamNums = $$(".score-num").map((e) => e.textContent);
   ok("yards allowed totals their gains minus their losses", teamNums[3] === "43");
+  click(byText(".nav button", "Game"));
+  await flush();
+
+  console.log("\nedit a past play");
+  click($(".logline [aria-label='Edit this play']"));
+  await flush();
+  const yEdit = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Yards");
+  ok("edit sheet opens with the play's current yards", !!yEdit && yEdit.value === "7");
+  sSetter.call(yEdit, "2");
+  yEdit.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Save the fix"));
+  await flush();
+  ok("edited yards recompute down and distance",
+    $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("2nd & 8") >= 0);
+  click(byText(".nav button", "Stats"));
+  await flush();
+  ok("yards allowed recomputed after the edit", $$(".score-num")[3].textContent === "38");
   click(byText(".nav button", "Game"));
   await flush();
 
