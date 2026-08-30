@@ -4448,6 +4448,272 @@ function ScheduleSection({
     }, "Remove"));
   }));
 }
+
+/* Full stats for one archived game — every game keeps its play-by-play and
+   per-player lines forever, so this works for the whole season history. */
+function GameStatsSheet({
+  rec,
+  teamName,
+  onClose
+}) {
+  const [view, setView] = useState("plays");
+  const plays = rec.plays || [];
+  const T = teamTotals(plays);
+  const margin = T.takeaways - T.giveaways;
+  const drives = computeDrives(plays);
+  const rows = (rec.players || []).map(r => ({
+    p: r,
+    s: Object.assign(blank(), r.s)
+  }));
+  const res = rec.us > rec.them ? "W" : rec.us < rec.them ? "L" : "T";
+  return /*#__PURE__*/React.createElement("div", {
+    className: "veil",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sheet",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sheet-hd"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "plate",
+    style: {
+      minWidth: 62,
+      fontSize: 16
+    }
+  }, rec.us, "\u2013", rec.them), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "sheet-ttl"
+  }, res, " ", rec.opponent ? "vs " + rec.opponent : "Game"), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, new Date(rec.endedAt).toLocaleDateString(), " \xB7 ", rec.playsCount, " plays", rec.scrim ? " · scrimmage" : "")), /*#__PURE__*/React.createElement("button", {
+    className: "close",
+    onClick: onClose
+  }, "Done")), /*#__PURE__*/React.createElement("div", {
+    className: "board",
+    style: {
+      marginTop: 0,
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "board-top"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Rush yds"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.rush)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Pass yds"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.pass)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Total off."), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.rush + T.pass))), /*#__PURE__*/React.createElement("div", {
+    className: "board-top",
+    style: {
+      marginTop: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "KO ret yds"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.kr)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Punt ret yds"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.pr)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Allowed"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.allowed))), /*#__PURE__*/React.createElement("div", {
+    className: "board-top",
+    style: {
+      marginTop: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "1st downs"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.fd)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "3rd down"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.thirdC, "/", T.thirdA)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Turnovers"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, (margin > 0 ? "+" : "") + margin)))), /*#__PURE__*/React.createElement("div", {
+    className: "stbar"
+  }, [["plays", "Play count"], ["off", "Offense"], ["def", "Defense"], ["st", "Special"], ["drv", "Drives"]].map(v => /*#__PURE__*/React.createElement("button", {
+    key: v[0],
+    className: view === v[0] ? "on" : "",
+    onClick: () => setView(v[0])
+  }, v[1]))), view !== "drv" && rows.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "empty-note"
+  }, "No player lines were saved with this game."), view === "plays" && rows.length > 0 && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Off"), /*#__PURE__*/React.createElement("th", null, "Def"), /*#__PURE__*/React.createElement("th", null, "Spec"), /*#__PURE__*/React.createElement("th", null, "Total"), /*#__PURE__*/React.createElement("th", null, "Pen"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.snaps - a.s.snaps).map(({
+    p,
+    s
+  }) => /*#__PURE__*/React.createElement("tr", {
+    key: p.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", p.num), " ", p.name), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.off), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.def), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.st), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.snaps), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.pen))))), view === "off" && rows.length > 0 && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Car"), /*#__PURE__*/React.createElement("th", null, "Rush"), /*#__PURE__*/React.createElement("th", null, "Rec"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Pass"), /*#__PURE__*/React.createElement("th", null, "PsYd"), /*#__PURE__*/React.createElement("th", null, "Fum"), /*#__PURE__*/React.createElement("th", null, "TD"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.rushY + b.s.recY - (a.s.rushY + a.s.recY)).map(({
+    p,
+    s
+  }) => /*#__PURE__*/React.createElement("tr", {
+    key: p.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", p.num), " ", p.name), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.rush), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.rushY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.rec), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.recY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.att ? s.cmp + "/" + s.att : "—"), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.passY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.fum), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.td))))), view === "def" && rows.length > 0 && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Tkl"), /*#__PURE__*/React.createElement("th", null, "Ast"), /*#__PURE__*/React.createElement("th", null, "TFL"), /*#__PURE__*/React.createElement("th", null, "Sck"), /*#__PURE__*/React.createElement("th", null, "LsYd"), /*#__PURE__*/React.createElement("th", null, "Int"), /*#__PURE__*/React.createElement("th", null, "FR"), /*#__PURE__*/React.createElement("th", null, "PBU"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.tk - a.s.tk).map(({
+    p,
+    s
+  }) => /*#__PURE__*/React.createElement("tr", {
+    key: p.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", p.num), " ", p.name), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.tk), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.ast), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.tfl), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.sack), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.lossY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.int), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.fr), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.pbu))))), view === "st" && rows.length > 0 && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Kicks"), /*#__PURE__*/React.createElement("th", null, "KYds"), /*#__PURE__*/React.createElement("th", null, "Ret"), /*#__PURE__*/React.createElement("th", null, "RYds"), /*#__PURE__*/React.createElement("th", null, "FG"), /*#__PURE__*/React.createElement("th", null, "Conv"), /*#__PURE__*/React.createElement("th", null, "Blk"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.kickY + b.s.retY - (a.s.kickY + a.s.retY)).map(({
+    p,
+    s
+  }) => /*#__PURE__*/React.createElement("tr", {
+    key: p.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", p.num), " ", p.name), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.kicks), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.kickY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.ret), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.retY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.fga ? s.fgm + "/" + s.fga : "—"), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.convA ? s.convM + "/" + s.convA : "—"), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.blk))))), view === "drv" && (drives.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "empty-note"
+  }, "No drives could be read from this game's play log.") : /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "#"), /*#__PURE__*/React.createElement("th", null, "Qtr"), /*#__PURE__*/React.createElement("th", null, "Plays"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Result"))), /*#__PURE__*/React.createElement("tbody", null, drives.map((d, i) => /*#__PURE__*/React.createElement("tr", {
+    key: i
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, i + 1)), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, "Q", d.q), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, d.plays), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, d.yards), /*#__PURE__*/React.createElement("td", null, d.result || "—")))))), /*#__PURE__*/React.createElement("button", {
+    className: "confirm",
+    onClick: () => shareText(boxScoreText(Object.assign({
+      team: teamName
+    }, rec)))
+  }, "Share the box score")));
+}
 function SeasonTab({
   games,
   squad,
@@ -4464,6 +4730,7 @@ function SeasonTab({
   const [year, setYear] = useState("all");
   const [view, setView] = useState("plays");
   const [editingGame, setEditingGame] = useState(null);
+  const [statsGame, setStatsGame] = useState(null);
   const fileRef = useRef(null);
   const saveGameEdit = () => {
     if (!editingGame) return;
@@ -4777,10 +5044,8 @@ function SeasonTab({
     onClick: () => onReopen(g)
   }, "Reopen"), /*#__PURE__*/React.createElement("button", {
     className: "mini",
-    onClick: () => shareText(boxScoreText(Object.assign({
-      team: teamName
-    }, g)))
-  }, "Box"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setStatsGame(g)
+  }, "Stats"), /*#__PURE__*/React.createElement("button", {
     className: "mini",
     onClick: () => setEditingGame({
       id: g.id,
@@ -4829,7 +5094,11 @@ function SeasonTab({
       textAlign: "left",
       marginTop: 10
     }
-  }, /*#__PURE__*/React.createElement("b", null, "Back up"), " downloads every saved game as one file \u2014 do it now and then, or before switching phones.", /*#__PURE__*/React.createElement("b", null, " Restore"), " merges a backup in without overwriting anything, so it also works for combining years."));
+  }, /*#__PURE__*/React.createElement("b", null, "Back up"), " downloads every saved game as one file \u2014 do it now and then, or before switching phones.", /*#__PURE__*/React.createElement("b", null, " Restore"), " merges a backup in without overwriting anything, so it also works for combining years."), statsGame && /*#__PURE__*/React.createElement(GameStatsSheet, {
+    rec: statsGame,
+    teamName: teamName,
+    onClose: () => setStatsGame(null)
+  }));
 }
 
 /* ============================ GAMECAST (VIEW ONLY) ============================ */

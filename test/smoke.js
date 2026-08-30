@@ -1129,6 +1129,25 @@ const type = (el, val) => {
   const nicoTot1 = $$("tbody tr").find((r) => r.textContent.indexOf("Nico") >= 0);
   ok("live snaps flow into season totals",
     !!nicoTot1 && parseInt(nicoTot1.querySelectorAll("td")[5].textContent, 10) === nicoBase + 1);
+
+  console.log("\nper-game stats for archived games");
+  const inSheet = (sel, txt) => Array.from($(".sheet").querySelectorAll(sel))
+    .find((e) => e.textContent.trim().toLowerCase().indexOf(txt.toLowerCase()) >= 0);
+  const g7row = byText(".row", "7–0");
+  ok("archived game row offers Stats", !!g7row &&
+    !!Array.from(g7row.querySelectorAll(".mini")).find((b) => b.textContent === "Stats"));
+  click(Array.from(g7row.querySelectorAll(".mini")).find((b) => b.textContent === "Stats"));
+  await flush();
+  ok("game stats sheet opened for the archived game", !!inSheet(".sheet-ttl", "vs Eagles"));
+  ok("team tiles shown for that game", $(".sheet").textContent.indexOf("Rush yds") >= 0 &&
+    $(".sheet").textContent.indexOf("1st downs") >= 0);
+  ok("player lines shown for that game", $(".sheet").querySelectorAll("tbody tr").length >= 2);
+  click(inSheet(".stbar button", "Drives"));
+  await flush();
+  ok("drives readable for the archived game", !!inSheet("td", "Touchdown"));
+  click(inSheet(".close", "Done"));
+  await flush();
+  ok("game stats sheet closes", !$(".sheet"));
   click(byText(".nav button", "Game"));
   await flush();
 

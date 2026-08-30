@@ -2598,10 +2598,177 @@ function ScheduleSection({ squad, setSquad, onTrack }) {
   );
 }
 
+/* Full stats for one archived game — every game keeps its play-by-play and
+   per-player lines forever, so this works for the whole season history. */
+function GameStatsSheet({ rec, teamName, onClose }) {
+  const [view, setView] = useState("plays");
+  const plays = rec.plays || [];
+  const T = teamTotals(plays);
+  const margin = T.takeaways - T.giveaways;
+  const drives = computeDrives(plays);
+  const rows = (rec.players || []).map((r) => ({ p: r, s: Object.assign(blank(), r.s) }));
+  const res = rec.us > rec.them ? "W" : rec.us < rec.them ? "L" : "T";
+  return (
+    <div className="veil" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-hd">
+          <div className="plate" style={{ minWidth: 62, fontSize: 16 }}>{rec.us}–{rec.them}</div>
+          <div>
+            <div className="sheet-ttl">{res} {rec.opponent ? "vs " + rec.opponent : "Game"}</div>
+            <div className="eyebrow">{new Date(rec.endedAt).toLocaleDateString()} · {rec.playsCount} plays
+              {rec.scrim ? " · scrimmage" : ""}</div>
+          </div>
+          <button className="close" onClick={onClose}>Done</button>
+        </div>
+
+        <div className="board" style={{ marginTop: 0, marginBottom: 10 }}>
+          <div className="board-top">
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>Rush yds</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.rush}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>Pass yds</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.pass}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>Total off.</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.rush + T.pass}</div>
+            </div>
+          </div>
+          <div className="board-top" style={{ marginTop: 8 }}>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>KO ret yds</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.kr}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>Punt ret yds</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.pr}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>Allowed</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.allowed}</div>
+            </div>
+          </div>
+          <div className="board-top" style={{ marginTop: 8 }}>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>1st downs</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.fd}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>3rd down</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.thirdC}/{T.thirdA}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>Turnovers</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{(margin > 0 ? "+" : "") + margin}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="stbar">
+          {[["plays", "Play count"], ["off", "Offense"], ["def", "Defense"], ["st", "Special"], ["drv", "Drives"]].map((v) => (
+            <button key={v[0]} className={view === v[0] ? "on" : ""} onClick={() => setView(v[0])}>{v[1]}</button>
+          ))}
+        </div>
+
+        {view !== "drv" && rows.length === 0 && (
+          <div className="empty-note">No player lines were saved with this game.</div>
+        )}
+        {view === "plays" && rows.length > 0 && (
+          <table>
+            <thead><tr><th>Player</th><th>Off</th><th>Def</th><th>Spec</th><th>Total</th><th>Pen</th></tr></thead>
+            <tbody>
+              {rows.slice().sort((a, b) => b.s.snaps - a.s.snaps).map(({ p, s }) => (
+                <tr key={p.id}>
+                  <td><b>#{p.num}</b> {p.name}</td>
+                  <td className="n">{s.off}</td><td className="n">{s.def}</td><td className="n">{s.st}</td>
+                  <td className="n">{s.snaps}</td><td className="n">{s.pen}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {view === "off" && rows.length > 0 && (
+          <table>
+            <thead><tr><th>Player</th><th>Car</th><th>Rush</th><th>Rec</th><th>Yds</th><th>Pass</th><th>PsYd</th><th>Fum</th><th>TD</th></tr></thead>
+            <tbody>
+              {rows.slice().sort((a, b) => (b.s.rushY + b.s.recY) - (a.s.rushY + a.s.recY)).map(({ p, s }) => (
+                <tr key={p.id}>
+                  <td><b>#{p.num}</b> {p.name}</td>
+                  <td className="n">{s.rush}</td><td className="n">{s.rushY}</td>
+                  <td className="n">{s.rec}</td><td className="n">{s.recY}</td>
+                  <td className="n">{s.att ? s.cmp + "/" + s.att : "—"}</td>
+                  <td className="n">{s.passY}</td><td className="n">{s.fum}</td><td className="n">{s.td}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {view === "def" && rows.length > 0 && (
+          <table>
+            <thead><tr><th>Player</th><th>Tkl</th><th>Ast</th><th>TFL</th><th>Sck</th><th>LsYd</th><th>Int</th><th>FR</th><th>PBU</th></tr></thead>
+            <tbody>
+              {rows.slice().sort((a, b) => b.s.tk - a.s.tk).map(({ p, s }) => (
+                <tr key={p.id}>
+                  <td><b>#{p.num}</b> {p.name}</td>
+                  <td className="n">{s.tk}</td><td className="n">{s.ast}</td><td className="n">{s.tfl}</td>
+                  <td className="n">{s.sack}</td><td className="n">{s.lossY}</td>
+                  <td className="n">{s.int}</td><td className="n">{s.fr}</td><td className="n">{s.pbu}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {view === "st" && rows.length > 0 && (
+          <table>
+            <thead><tr><th>Player</th><th>Kicks</th><th>KYds</th><th>Ret</th><th>RYds</th><th>FG</th><th>Conv</th><th>Blk</th></tr></thead>
+            <tbody>
+              {rows.slice().sort((a, b) => (b.s.kickY + b.s.retY) - (a.s.kickY + a.s.retY)).map(({ p, s }) => (
+                <tr key={p.id}>
+                  <td><b>#{p.num}</b> {p.name}</td>
+                  <td className="n">{s.kicks}</td><td className="n">{s.kickY}</td>
+                  <td className="n">{s.ret}</td><td className="n">{s.retY}</td>
+                  <td className="n">{s.fga ? s.fgm + "/" + s.fga : "—"}</td>
+                  <td className="n">{s.convA ? s.convM + "/" + s.convA : "—"}</td>
+                  <td className="n">{s.blk}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {view === "drv" && (
+          drives.length === 0 ? (
+            <div className="empty-note">No drives could be read from this game's play log.</div>
+          ) : (
+            <table>
+              <thead><tr><th>#</th><th>Qtr</th><th>Plays</th><th>Yds</th><th>Result</th></tr></thead>
+              <tbody>
+                {drives.map((d, i) => (
+                  <tr key={i}>
+                    <td><b>{i + 1}</b></td>
+                    <td className="n">Q{d.q}</td><td className="n">{d.plays}</td><td className="n">{d.yards}</td>
+                    <td>{d.result || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+        )}
+
+        <button className="confirm" onClick={() =>
+          shareText(boxScoreText(Object.assign({ team: teamName }, rec)))}>
+          Share the box score</button>
+      </div>
+    </div>
+  );
+}
+
 function SeasonTab({ games, squad, setSquad, teamName, onEdit, onRemove, onImport, onTrack, reopenableId, onReopen, live }) {
   const [year, setYear] = useState("all");
   const [view, setView] = useState("plays");
   const [editingGame, setEditingGame] = useState(null);
+  const [statsGame, setStatsGame] = useState(null);
   const fileRef = useRef(null);
 
   const saveGameEdit = () => {
@@ -2829,7 +2996,7 @@ function SeasonTab({ games, squad, setSquad, teamName, onEdit, onRemove, onImpor
               {g.id === reopenableId && (
                 <button className="mini dark" onClick={() => onReopen(g)}>Reopen</button>
               )}
-              <button className="mini" onClick={() => shareText(boxScoreText(Object.assign({ team: teamName }, g)))}>Box</button>
+              <button className="mini" onClick={() => setStatsGame(g)}>Stats</button>
               <button className="mini" onClick={() => setEditingGame({ id: g.id, opponent: g.opponent || "",
                 date: (g.endedAt || "").slice(0, 10), us: String(g.us), them: String(g.them),
                 scrim: !!g.scrim })}>Edit</button>
@@ -2852,6 +3019,10 @@ function SeasonTab({ games, squad, setSquad, teamName, onEdit, onRemove, onImpor
         <b>Back up</b> downloads every saved game as one file — do it now and then, or before switching phones.
         <b> Restore</b> merges a backup in without overwriting anything, so it also works for combining years.
       </div>
+
+      {statsGame && (
+        <GameStatsSheet rec={statsGame} teamName={teamName} onClose={() => setStatsGame(null)} />
+      )}
     </React.Fragment>
   );
 }
