@@ -302,6 +302,47 @@ const type = (el, val) => {
   click(byText(".nav button", "Game"));
   await flush();
 
+  console.log("\npassing stats");
+  click($$(".pcard.empty")[0].querySelector(".pc-top"));
+  await flush();
+  click($$(".sheet .row").find((r) => r.textContent.indexOf("Eli") >= 0));
+  await flush();
+  const eliCard = $$(".pcard").find((c) => c.textContent.indexOf("Eli") >= 0);
+  ok("receiver subbed onto the field", !!eliCard);
+  click(eliCard.querySelector(".pc-top"));
+  await flush();
+  ok("Threw it option is gone", !byText(".opt", "Threw it"));
+  ok("Incomplete pass is an option", !!byText(".opt", "Incomplete pass"));
+  click(byText(".opt", "Caught it"));
+  await flush();
+  const passerSel = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Who threw it");
+  ok("passer dropdown defaults to the QB",
+    !!passerSel && passerSel.options[passerSel.selectedIndex].textContent.indexOf("Jordan") >= 0);
+  const ySel = $(".yardbox select");
+  sSetter.call(ySel, "15");
+  ySel.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  click($$(".pcard").find((c) => c.textContent.indexOf("Eli") >= 0).querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "Incomplete pass"));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  click(byText(".nav button", "Stats"));
+  await flush();
+  click(byText(".stbar button", "Offense"));
+  await flush();
+  const jStatRow = $$("tbody tr").find((r) => r.textContent.indexOf("Jordan") >= 0);
+  ok("QB auto-credited 1 completion on 2 attempts", jStatRow && jStatRow.querySelectorAll("td")[5].textContent === "1/2");
+  ok("QB credited the 15 pass yards", jStatRow && jStatRow.querySelectorAll("td")[6].textContent === "15");
+  const eStatRow = $$("tbody tr").find((r) => r.textContent.indexOf("Eli") >= 0);
+  ok("receiver credited the catch and yards", eStatRow &&
+    eStatRow.querySelectorAll("td")[3].textContent === "1" && eStatRow.querySelectorAll("td")[4].textContent === "15");
+  click(byText(".nav button", "Game"));
+  await flush();
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

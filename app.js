@@ -45,9 +45,9 @@ const OFF_ACTIONS = [{
   label: "Caught it",
   hint: "reception"
 }, {
-  key: "pass",
-  label: "Threw it",
-  hint: "completion"
+  key: "incomplete",
+  label: "Incomplete pass",
+  hint: "no catch"
 }, {
   key: "fumble",
   label: "Fumbled",
@@ -135,6 +135,7 @@ const VERB = {
   rush: "ran",
   catch: "caught",
   pass: "threw",
+  incomplete: "incomplete pass",
   return: "returned",
   tackle: "tackle",
   assist: "assist",
@@ -252,6 +253,8 @@ const blank = () => ({
   rushY: 0,
   rec: 0,
   recY: 0,
+  cmp: 0,
+  att: 0,
   passY: 0,
   tk: 0,
   ast: 0,
@@ -271,6 +274,16 @@ function tally(plays) {
       s.snaps++;
       if (p.unit === "offense") s.off++;else if (p.unit === "defense") s.def++;else s.st++;
     });
+    /* A caught or incomplete pass also credits the passer (QB by default,
+       or whoever the coach picked for a trick play). */
+    if (p.passerId && (p.action === "catch" || p.action === "incomplete")) {
+      const q = g(p.passerId);
+      q.att++;
+      if (p.action === "catch") {
+        q.cmp++;
+        q.passY += p.yards || 0;
+      }
+    }
     if (!p.playerId) return;
     const s = g(p.playerId),
       y = p.yards || 0;
@@ -282,7 +295,11 @@ function tally(plays) {
       s.rec++;
       s.recY += y;
     }
-    if (p.action === "pass") s.passY += y;
+    if (p.action === "pass") {
+      s.passY += y;
+      s.cmp++;
+      s.att++;
+    }
     if (p.action === "return") s.rushY += y;
     if (p.action === "tackle") s.tk++;
     if (p.action === "assist") s.ast++;
@@ -797,7 +814,8 @@ function Sideline() {
     playerId,
     action,
     yards,
-    score
+    score,
+    passerId
   }) => {
     addOp({
       type: "play",
@@ -806,6 +824,7 @@ function Sideline() {
       playerId: playerId || null,
       action: action || null,
       yards: yards || 0,
+      passerId: passerId || null,
       score: score && score !== "none" ? score : null,
       snaps: fieldIds
     });
@@ -946,6 +965,8 @@ function Sideline() {
     slot: sheet.slot,
     player: byId[sheet.slot.playerId],
     unit: game.unit,
+    onField: onField,
+    byId: byId,
     onClose: () => setSheet(null),
     onLog: logPlay
   }), sheet && sheet.type === "sub" && /*#__PURE__*/React.createElement(SubSheet, {
@@ -1257,7 +1278,7 @@ function PlayLog({
       key: p.id
     }, /*#__PURE__*/React.createElement("span", {
       className: "eyebrow"
-    }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : /*#__PURE__*/React.createElement("b", null, "Whole unit"), " ", VERB[p.action] || "", " ", ["rush", "catch", "pass", "return"].indexOf(p.action) >= 0 ? p.yards + " yd" : "", sc && /*#__PURE__*/React.createElement("span", {
+    }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : /*#__PURE__*/React.createElement("b", null, "Whole unit"), " ", VERB[p.action] || "", " ", ["rush", "catch", "pass", "return"].indexOf(p.action) >= 0 ? p.yards + " yd" : "", p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : "", sc && /*#__PURE__*/React.createElement("span", {
       style: {
         color: "var(--stop)",
         fontWeight: 700
@@ -1289,6 +1310,8 @@ function PlaySheet({
   slot,
   player,
   unit,
+  onField,
+  byId,
   onClose,
   onLog
 }) {
@@ -1296,7 +1319,12 @@ function PlaySheet({
   const [action, setAction] = useState(actions[0].key);
   const [yards, setYards] = useState(0);
   const [score, setScore] = useState("none");
+  /* Pass plays assume whoever is in the QB spot threw it; the coach can pick
+     any other on-field player for a halfback pass or similar. */
+  const qbSlot = (onField || []).find(s => s.playerId && s.playerId !== (player && player.id) && (s.label || "").toUpperCase().indexOf("QB") >= 0);
+  const [passerId, setPasserId] = useState(qbSlot ? qbSlot.playerId : "");
   const needsYards = ["rush", "catch", "pass", "return", "kick"].indexOf(action) >= 0;
+  const isPassPlay = unit === "offense" && (action === "catch" || action === "incomplete");
   if (!player) return null;
   return /*#__PURE__*/React.createElement("div", {
     className: "veil",
@@ -1352,7 +1380,22 @@ function PlaySheet({
   }, (_, i) => i - 20).map(y => /*#__PURE__*/React.createElement("option", {
     key: y,
     value: y
-  }, (y > 0 ? "+" + y : y) + (Math.abs(y) === 1 ? " yard" : " yards"))))), /*#__PURE__*/React.createElement("div", {
+  }, (y > 0 ? "+" + y : y) + (Math.abs(y) === 1 ? " yard" : " yards"))))), isPassPlay && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "Who threw it"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Who threw it",
+    value: passerId,
+    onChange: e => setPasserId(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "No passer / not sure"), (onField || []).filter(s => s.playerId && s.playerId !== player.id).map(s => /*#__PURE__*/React.createElement("option", {
+    key: s.id,
+    value: s.playerId
+  }, "#", byId[s.playerId].num, " ", byId[s.playerId].name, " (", s.label, ")")))), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       margin: "12px 0 6px"
@@ -1373,7 +1416,8 @@ function PlaySheet({
       playerId: player.id,
       action,
       yards: needsYards ? yards : 0,
-      score
+      score,
+      passerId: isPassPlay ? passerId || null : null
     })
   }, "Log the play")));
 }
@@ -2061,11 +2105,11 @@ function StatsTab({
   const plays = rows.slice().sort((a, b) => a.s.snaps - b.s.snaps);
   const short = plays.filter(r => r.s.snaps < minPlays);
   const exportCsv = () => {
-    const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
+    const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
     const body = rows.slice().sort((a, b) => (parseInt(a.p.num, 10) || 0) - (parseInt(b.p.num, 10) || 0)).map(({
       p,
       s
-    }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY, s.passY, s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.td, s.pts]);
+    }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY, s.cmp, s.att, s.passY, s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.td, s.pts]);
     const csv = [head].concat(body).map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv");
   };
@@ -2112,7 +2156,7 @@ function StatsTab({
     style: {
       color: s.snaps < minPlays ? "var(--stop)" : "var(--go)"
     }
-  }, s.snaps)))))), view === "off" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Car"), /*#__PURE__*/React.createElement("th", null, "Rush"), /*#__PURE__*/React.createElement("th", null, "Rec"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Pass"), /*#__PURE__*/React.createElement("th", null, "TD"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.rushY + b.s.recY - (a.s.rushY + a.s.recY)).map(({
+  }, s.snaps)))))), view === "off" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Car"), /*#__PURE__*/React.createElement("th", null, "Rush"), /*#__PURE__*/React.createElement("th", null, "Rec"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Pass"), /*#__PURE__*/React.createElement("th", null, "PsYd"), /*#__PURE__*/React.createElement("th", null, "TD"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.rushY + b.s.recY - (a.s.rushY + a.s.recY)).map(({
     p,
     s
   }) => /*#__PURE__*/React.createElement("tr", {
@@ -2126,6 +2170,8 @@ function StatsTab({
   }, s.rec), /*#__PURE__*/React.createElement("td", {
     className: "n"
   }, s.recY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.att ? s.cmp + "/" + s.att : "—"), /*#__PURE__*/React.createElement("td", {
     className: "n"
   }, s.passY), /*#__PURE__*/React.createElement("td", {
     className: "n"
@@ -2326,8 +2372,8 @@ function SeasonTab({
   const ties = shown.length - wins - losses;
   const newest = shown.slice().sort((a, b) => a.endedAt < b.endedAt ? 1 : -1);
   const exportCsv = () => {
-    const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
-    const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0)).map(t => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY, t.passY, t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.td, t.pts]);
+    const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
+    const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0)).map(t => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY, t.cmp, t.att, t.passY, t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.td, t.pts]);
     const csv = [head].concat(body).map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-season-" + (year === "all" ? "all" : year) + ".csv", csv, "text/csv");
   };
@@ -2388,7 +2434,7 @@ function SeasonTab({
     className: "n"
   }, t.st), /*#__PURE__*/React.createElement("td", {
     className: "n"
-  }, t.snaps))))), view === "off" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Car"), /*#__PURE__*/React.createElement("th", null, "Rush"), /*#__PURE__*/React.createElement("th", null, "Rec"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Pass"), /*#__PURE__*/React.createElement("th", null, "TD"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.rushY + b.recY - (a.rushY + a.recY)).map(t => /*#__PURE__*/React.createElement("tr", {
+  }, t.snaps))))), view === "off" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Car"), /*#__PURE__*/React.createElement("th", null, "Rush"), /*#__PURE__*/React.createElement("th", null, "Rec"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Pass"), /*#__PURE__*/React.createElement("th", null, "PsYd"), /*#__PURE__*/React.createElement("th", null, "TD"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.rushY + b.recY - (a.rushY + a.recY)).map(t => /*#__PURE__*/React.createElement("tr", {
     key: t.id
   }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", t.num), " ", t.name), /*#__PURE__*/React.createElement("td", {
     className: "n"
@@ -2399,6 +2445,8 @@ function SeasonTab({
   }, t.rec), /*#__PURE__*/React.createElement("td", {
     className: "n"
   }, t.recY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.att ? t.cmp + "/" + t.att : "—"), /*#__PURE__*/React.createElement("td", {
     className: "n"
   }, t.passY), /*#__PURE__*/React.createElement("td", {
     className: "n"

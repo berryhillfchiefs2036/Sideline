@@ -19,7 +19,7 @@ const ST_KEYS = Object.keys(SPECIAL_TEAMS);
 const OFF_ACTIONS = [
   { key: "rush", label: "Ran it", hint: "carry" },
   { key: "catch", label: "Caught it", hint: "reception" },
-  { key: "pass", label: "Threw it", hint: "completion" },
+  { key: "incomplete", label: "Incomplete pass", hint: "no catch" },
   { key: "fumble", label: "Fumbled", hint: "lost ball" },
 ];
 const DEF_ACTIONS = [
@@ -50,7 +50,7 @@ const UNITS = [
   { key: "defense", label: "Defense" },
   { key: "special", label: "Special" },
 ];
-const VERB = { rush: "ran", catch: "caught", pass: "threw", return: "returned", tackle: "tackle",
+const VERB = { rush: "ran", catch: "caught", pass: "threw", incomplete: "incomplete pass", return: "returned", tackle: "tackle",
   assist: "assist", sack: "sack", int: "interception", fumrec: "recovery", pbu: "pass broken up",
   fumble: "fumble", team: "team play", kick: "kicked" };
 
@@ -108,8 +108,8 @@ function fold(ops) {
   return g;
 }
 
-const blank = () => ({ snaps: 0, off: 0, def: 0, st: 0, rush: 0, rushY: 0, rec: 0, recY: 0, passY: 0,
-  tk: 0, ast: 0, sack: 0, int: 0, fr: 0, pbu: 0, td: 0, pts: 0 });
+const blank = () => ({ snaps: 0, off: 0, def: 0, st: 0, rush: 0, rushY: 0, rec: 0, recY: 0,
+  cmp: 0, att: 0, passY: 0, tk: 0, ast: 0, sack: 0, int: 0, fr: 0, pbu: 0, td: 0, pts: 0 });
 
 function tally(plays) {
   const m = {};
@@ -119,11 +119,18 @@ function tally(plays) {
       const s = g(id); s.snaps++;
       if (p.unit === "offense") s.off++; else if (p.unit === "defense") s.def++; else s.st++;
     });
+    /* A caught or incomplete pass also credits the passer (QB by default,
+       or whoever the coach picked for a trick play). */
+    if (p.passerId && (p.action === "catch" || p.action === "incomplete")) {
+      const q = g(p.passerId);
+      q.att++;
+      if (p.action === "catch") { q.cmp++; q.passY += p.yards || 0; }
+    }
     if (!p.playerId) return;
     const s = g(p.playerId), y = p.yards || 0;
     if (p.action === "rush") { s.rush++; s.rushY += y; }
     if (p.action === "catch") { s.rec++; s.recY += y; }
-    if (p.action === "pass") s.passY += y;
+    if (p.action === "pass") { s.passY += y; s.cmp++; s.att++; }
     if (p.action === "return") s.rushY += y;
     if (p.action === "tackle") s.tk++;
     if (p.action === "assist") s.ast++;
@@ -462,9 +469,9 @@ function Sideline() {
     if (elsewhere) putIn(elsewhere.id, slot.playerId || null, group);
     putIn(slot.id, playerId, group);
   };
-  const logPlay = ({ playerId, action, yards, score }) => {
+  const logPlay = ({ playerId, action, yards, score, passerId }) => {
     addOp({ type: "play", unit: game.unit, stKey: game.unit === "special" ? game.stKey : null,
-      playerId: playerId || null, action: action || null, yards: yards || 0,
+      playerId: playerId || null, action: action || null, yards: yards || 0, passerId: passerId || null,
       score: score && score !== "none" ? score : null, snaps: fieldIds });
     setSheet(null);
   };
@@ -551,7 +558,7 @@ function Sideline() {
 
       {sheet && sheet.type === "play" && (
         <PlaySheet slot={sheet.slot} player={byId[sheet.slot.playerId]} unit={game.unit}
-          onClose={() => setSheet(null)} onLog={logPlay} />)}
+          onField={onField} byId={byId} onClose={() => setSheet(null)} onLog={logPlay} />)}
       {sheet && sheet.type === "sub" && (
         <SubSheet slot={sheet.slot} roster={roster} byId={byId} onField={onField} statOf={statOf}
           minPlays={minPlays} onClose={() => setSheet(null)}
@@ -744,6 +751,7 @@ function PlayLog({ game, byId, addOp }) {
                 {pl ? <b>#{pl.num} {pl.name}</b> : <b>Whole unit</b>}{" "}
                 {VERB[p.action] || ""}{" "}
                 {["rush", "catch", "pass", "return"].indexOf(p.action) >= 0 ? p.yards + " yd" : ""}
+                {p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : ""}
                 {sc && <span style={{ color: "var(--stop)", fontWeight: 700 }}> · {sc.label}</span>}
               </span>
               <span className="who">{p.byName || ""}</span>
@@ -763,12 +771,18 @@ function PlayLog({ game, byId, addOp }) {
 
 /* ============================ SHEETS ============================ */
 
-function PlaySheet({ slot, player, unit, onClose, onLog }) {
+function PlaySheet({ slot, player, unit, onField, byId, onClose, onLog }) {
   const actions = unit === "offense" ? OFF_ACTIONS : unit === "defense" ? DEF_ACTIONS : ST_ACTIONS;
   const [action, setAction] = useState(actions[0].key);
   const [yards, setYards] = useState(0);
   const [score, setScore] = useState("none");
+  /* Pass plays assume whoever is in the QB spot threw it; the coach can pick
+     any other on-field player for a halfback pass or similar. */
+  const qbSlot = (onField || []).find((s) => s.playerId && s.playerId !== (player && player.id) &&
+    (s.label || "").toUpperCase().indexOf("QB") >= 0);
+  const [passerId, setPasserId] = useState(qbSlot ? qbSlot.playerId : "");
   const needsYards = ["rush", "catch", "pass", "return", "kick"].indexOf(action) >= 0;
+  const isPassPlay = unit === "offense" && (action === "catch" || action === "incomplete");
   if (!player) return null;
   return (
     <div className="veil" onClick={onClose}>
@@ -802,6 +816,18 @@ function PlaySheet({ slot, player, unit, onClose, onLog }) {
             </select>
           </div>
         )}
+        {isPassPlay && (
+          <React.Fragment>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Who threw it</div>
+            <select className="inp" aria-label="Who threw it" value={passerId}
+              onChange={(e) => setPasserId(e.target.value)}>
+              <option value="">No passer / not sure</option>
+              {(onField || []).filter((s) => s.playerId && s.playerId !== player.id).map((s) => (
+                <option key={s.id} value={s.playerId}>#{byId[s.playerId].num} {byId[s.playerId].name} ({s.label})</option>
+              ))}
+            </select>
+          </React.Fragment>
+        )}
         <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Points on the play</div>
         <div className="opts">
           {SCORES.map((s) => (
@@ -811,7 +837,8 @@ function PlaySheet({ slot, player, unit, onClose, onLog }) {
           ))}
         </div>
         <button className="confirm"
-          onClick={() => onLog({ playerId: player.id, action, yards: needsYards ? yards : 0, score })}>
+          onClick={() => onLog({ playerId: player.id, action, yards: needsYards ? yards : 0, score,
+            passerId: isPassPlay ? passerId || null : null })}>
           Log the play</button>
       </div>
     </div>
@@ -1174,10 +1201,10 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
 
   const exportCsv = () => {
     const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds",
-      "Catches", "RecYds", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
+      "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
     const body = rows.slice().sort((a, b) => (parseInt(a.p.num, 10) || 0) - (parseInt(b.p.num, 10) || 0))
       .map(({ p, s }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY,
-        s.passY, s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.td, s.pts]);
+        s.cmp, s.att, s.passY, s.tk, s.ast, s.sack, s.int, s.fr, s.pbu, s.td, s.pts]);
     const csv = [head].concat(body).map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv");
   };
@@ -1219,13 +1246,14 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
 
       {view === "off" && (
         <table>
-          <thead><tr><th>Player</th><th>Car</th><th>Rush</th><th>Rec</th><th>Yds</th><th>Pass</th><th>TD</th></tr></thead>
+          <thead><tr><th>Player</th><th>Car</th><th>Rush</th><th>Rec</th><th>Yds</th><th>Pass</th><th>PsYd</th><th>TD</th></tr></thead>
           <tbody>
             {rows.slice().sort((a, b) => (b.s.rushY + b.s.recY) - (a.s.rushY + a.s.recY)).map(({ p, s }) => (
               <tr key={p.id}>
                 <td><b>#{p.num}</b> {p.name}</td>
                 <td className="n">{s.rush}</td><td className="n">{s.rushY}</td>
                 <td className="n">{s.rec}</td><td className="n">{s.recY}</td>
+                <td className="n">{s.att ? s.cmp + "/" + s.att : "—"}</td>
                 <td className="n">{s.passY}</td><td className="n">{s.td}</td>
               </tr>
             ))}
@@ -1356,10 +1384,10 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
 
   const exportCsv = () => {
     const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds",
-      "Catches", "RecYds", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
+      "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Tackles", "Assists", "Sacks", "Int", "FumRec", "PBU", "TD", "Points"];
     const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0))
       .map((t) => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY,
-        t.passY, t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.td, t.pts]);
+        t.cmp, t.att, t.passY, t.tk, t.ast, t.sack, t.int, t.fr, t.pbu, t.td, t.pts]);
     const csv = [head].concat(body).map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-season-" + (year === "all" ? "all" : year) + ".csv", csv, "text/csv");
   };
@@ -1428,13 +1456,14 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
           )}
           {view === "off" && (
             <table>
-              <thead><tr><th>Player</th><th>Car</th><th>Rush</th><th>Rec</th><th>Yds</th><th>Pass</th><th>TD</th></tr></thead>
+              <thead><tr><th>Player</th><th>Car</th><th>Rush</th><th>Rec</th><th>Yds</th><th>Pass</th><th>PsYd</th><th>TD</th></tr></thead>
               <tbody>
                 {totals.slice().sort((a, b) => (b.rushY + b.recY) - (a.rushY + a.recY)).map((t) => (
                   <tr key={t.id}>
                     <td><b>#{t.num}</b> {t.name}</td>
                     <td className="n">{t.rush}</td><td className="n">{t.rushY}</td>
                     <td className="n">{t.rec}</td><td className="n">{t.recY}</td>
+                    <td className="n">{t.att ? t.cmp + "/" + t.att : "—"}</td>
                     <td className="n">{t.passY}</td><td className="n">{t.td}</td>
                   </tr>
                 ))}
