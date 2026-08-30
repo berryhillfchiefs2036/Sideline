@@ -275,6 +275,8 @@ const VERB = {
   fga: "field goal attempt",
   conv: "conversion try",
   punt: "punt — no return",
+  stopconv: "stopped their try",
+  block: "blocked the kick",
   tackle: "tackle",
   tfl: "tackle for loss",
   assist: "assist",
@@ -411,7 +413,8 @@ function fold(ops) {
       if (ours) g.us += pts;else g.them += pts;
       g.down = 1;
       g.distance = 10;
-    } else if (o.unit === "offense" || o.unit === "defense") {
+    } else if ((o.unit === "offense" || o.unit === "defense") && o.action !== "stopconv" && o.action !== "block") {
+      /* stopconv/block are failed conversion tries — no down to advance. */
       const turnover = o.action === "int" || o.action === "fumrec" || o.action === "fumble";
       if (turnover) {
         g.down = 1;
@@ -464,6 +467,7 @@ const blank = () => ({
   int: 0,
   fr: 0,
   pbu: 0,
+  blk: 0,
   pen: 0,
   penY: 0,
   td: 0,
@@ -552,6 +556,8 @@ function tally(plays) {
     if (p.action === "int") s.int++;
     if (p.action === "fumrec") s.fr++;
     if (p.action === "pbu") s.pbu++;
+    if (p.action === "stopconv") s.tk++;
+    if (p.action === "block") s.blk++;
     if (p.score === "td") s.td++;
     const sc = SCORES.find(x => x.key === p.score);
     if (sc || p.pts != null) s.pts += p.pts != null ? p.pts : sc.pts;
@@ -1242,22 +1248,25 @@ function Sideline() {
     }
   }), sheet && sheet.type === "them" && /*#__PURE__*/React.createElement(ThemSheet, {
     scores: scores,
+    roster: roster,
     onClose: () => setSheet(null),
     onLog: ({
       score,
       pts,
       yards,
-      action
+      action,
+      playerId,
+      ours
     }) => {
       addOp({
         type: "play",
         unit: game.unit,
         stKey: game.unit === "special" ? game.stKey : null,
-        playerId: null,
+        playerId: playerId || null,
         action: action || null,
         yards: yards || 0,
         passerId: null,
-        them: true,
+        them: ours ? null : true,
         score,
         pts,
         snaps: fieldIds
@@ -1946,6 +1955,12 @@ function EditPlaySheet({
   const actList = (play.unit === "offense" ? OFF_ACTIONS : play.unit === "defense" ? DEF_ACTIONS : ST_ACTIONS).concat([{
     key: "team",
     label: "Snap, no stat"
+  }, {
+    key: "stopconv",
+    label: "Stopped their try"
+  }, {
+    key: "block",
+    label: "Blocked the kick"
   }]);
   const isLoss = action === "sack" || action === "tfl";
   const isPass = play.unit === "offense" && (action === "catch" || action === "incomplete");
@@ -2180,16 +2195,27 @@ function EditPlaySheet({
 }
 function ThemSheet({
   scores,
+  roster,
   onClose,
   onLog
 }) {
   const [score, setScore] = useState("td");
   const [yards, setYards] = useState(0);
+  const [credit, setCredit] = useState("");
   const list = scores.filter(s => s.key !== "none").concat([{
     key: "punt",
     label: "Punt — no return",
     pts: 0
+  }, {
+    key: "stopconv",
+    label: "Try stopped",
+    pts: 0
+  }, {
+    key: "block",
+    label: "Kick blocked",
+    pts: 0
   }]);
+  const isStop = score === "stopconv" || score === "block";
   return /*#__PURE__*/React.createElement("div", {
     className: "veil",
     onClick: onClose
@@ -2215,7 +2241,22 @@ function ThemSheet({
     className: "opt-l"
   }, s.label), /*#__PURE__*/React.createElement("div", {
     className: "opt-h"
-  }, s.key === "punt" ? "we take over" : "+" + s.pts + " for them")))), (score === "td" || score === "punt") && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, s.key === "punt" ? "we take over" : s.key === "stopconv" || s.key === "block" ? "their try failed" : "+" + s.pts + " for them")))), isStop && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, score === "block" ? "Who blocked the kick" : "Who made the tackle"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Who gets the credit",
+    value: credit,
+    onChange: e => setCredit(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Whole unit"), roster.map(p => /*#__PURE__*/React.createElement("option", {
+    key: p.id,
+    value: p.id
+  }, "#", p.num, " ", p.name)))), (score === "td" || score === "punt") && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       margin: "12px 0 6px"
@@ -2234,14 +2275,25 @@ function ThemSheet({
     className: "confirm alt",
     onClick: () => {
       const sc = list.find(x => x.key === score);
-      onLog({
-        score: score === "punt" ? null : score,
-        action: score === "punt" ? "punt" : null,
-        pts: score === "punt" ? null : sc ? sc.pts : 0,
-        yards: score === "td" || score === "punt" ? yards : 0
-      });
+      if (isStop) {
+        onLog({
+          score: null,
+          action: score,
+          pts: null,
+          yards: 0,
+          playerId: credit || null,
+          ours: true
+        });
+      } else {
+        onLog({
+          score: score === "punt" ? null : score,
+          action: score === "punt" ? "punt" : null,
+          pts: score === "punt" ? null : sc ? sc.pts : 0,
+          yards: score === "td" || score === "punt" ? yards : 0
+        });
+      }
     }
-  }, score === "punt" ? "Log the punt" : "Put it on their side")));
+  }, isStop ? "Log the stop" : score === "punt" ? "Log the punt" : "Put it on their side")));
 }
 function SpotSheet({
   spot,
@@ -3003,11 +3055,11 @@ function StatsTab({
     return a + (p.action === "sack" || p.action === "tfl" ? -y : y);
   }, 0);
   const exportCsv = () => {
-    const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "Fumbles", "FumLost", "Tackles", "Assists", "TFL", "Sacks", "LossYds", "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
+    const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "BlkKicks", "Fumbles", "FumLost", "Tackles", "Assists", "TFL", "Sacks", "LossYds", "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
     const body = rows.slice().sort((a, b) => (parseInt(a.p.num, 10) || 0) - (parseInt(b.p.num, 10) || 0)).map(({
       p,
       s
-    }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY, s.cmp, s.att, s.passY, s.kicks, s.kickY, s.ret, s.retY, s.fgm, s.fga, s.convM, s.convA, s.fum, s.fumL, s.tk, s.ast, s.tfl, s.sack, s.lossY, s.int, s.fr, s.pbu, s.pen, s.penY, s.td, s.pts]);
+    }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY, s.cmp, s.att, s.passY, s.kicks, s.kickY, s.ret, s.retY, s.fgm, s.fga, s.convM, s.convA, s.blk, s.fum, s.fumL, s.tk, s.ast, s.tfl, s.sack, s.lossY, s.int, s.fr, s.pbu, s.pen, s.penY, s.td, s.pts]);
     const csv = [head].concat(body).map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv");
   };
@@ -3154,7 +3206,7 @@ function StatsTab({
     className: "n"
   }, s.fr), /*#__PURE__*/React.createElement("td", {
     className: "n"
-  }, s.pbu))))), view === "st" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Kicks"), /*#__PURE__*/React.createElement("th", null, "KYds"), /*#__PURE__*/React.createElement("th", null, "Ret"), /*#__PURE__*/React.createElement("th", null, "RYds"), /*#__PURE__*/React.createElement("th", null, "FG"), /*#__PURE__*/React.createElement("th", null, "Conv"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.kickY + b.s.retY - (a.s.kickY + a.s.retY)).map(({
+  }, s.pbu))))), view === "st" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Kicks"), /*#__PURE__*/React.createElement("th", null, "KYds"), /*#__PURE__*/React.createElement("th", null, "Ret"), /*#__PURE__*/React.createElement("th", null, "RYds"), /*#__PURE__*/React.createElement("th", null, "FG"), /*#__PURE__*/React.createElement("th", null, "Conv"), /*#__PURE__*/React.createElement("th", null, "Blk"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.kickY + b.s.retY - (a.s.kickY + a.s.retY)).map(({
     p,
     s
   }) => /*#__PURE__*/React.createElement("tr", {
@@ -3171,7 +3223,9 @@ function StatsTab({
     className: "n"
   }, s.fga ? s.fgm + "/" + s.fga : "—"), /*#__PURE__*/React.createElement("td", {
     className: "n"
-  }, s.convA ? s.convM + "/" + s.convA : "—"))))), /*#__PURE__*/React.createElement("div", {
+  }, s.convA ? s.convM + "/" + s.convA : "—"), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.blk))))), /*#__PURE__*/React.createElement("div", {
     className: "sechd"
   }, /*#__PURE__*/React.createElement("div", {
     className: "h2"
@@ -3353,8 +3407,8 @@ function SeasonTab({
   const pa = shown.reduce((a, g) => a + (g.them || 0), 0);
   const newest = shown.slice().sort((a, b) => a.endedAt < b.endedAt ? 1 : -1);
   const exportCsv = () => {
-    const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "Fumbles", "FumLost", "Tackles", "Assists", "TFL", "Sacks", "LossYds", "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
-    const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0)).map(t => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY, t.cmp, t.att, t.passY, t.kicks, t.kickY, t.ret, t.retY, t.fgm, t.fga, t.convM, t.convA, t.fum, t.fumL, t.tk, t.ast, t.tfl, t.sack, t.lossY, t.int, t.fr, t.pbu, t.pen, t.penY, t.td, t.pts]);
+    const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "BlkKicks", "Fumbles", "FumLost", "Tackles", "Assists", "TFL", "Sacks", "LossYds", "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
+    const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0)).map(t => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY, t.cmp, t.att, t.passY, t.kicks, t.kickY, t.ret, t.retY, t.fgm, t.fga, t.convM, t.convA, t.blk, t.fum, t.fumL, t.tk, t.ast, t.tfl, t.sack, t.lossY, t.int, t.fr, t.pbu, t.pen, t.penY, t.td, t.pts]);
     const csv = [head].concat(body).map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-season-" + (year === "all" ? "all" : year) + ".csv", csv, "text/csv");
   };
@@ -3468,7 +3522,7 @@ function SeasonTab({
     className: "n"
   }, t.fr), /*#__PURE__*/React.createElement("td", {
     className: "n"
-  }, t.pbu))))), view === "st" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Kicks"), /*#__PURE__*/React.createElement("th", null, "KYds"), /*#__PURE__*/React.createElement("th", null, "Ret"), /*#__PURE__*/React.createElement("th", null, "RYds"), /*#__PURE__*/React.createElement("th", null, "FG"), /*#__PURE__*/React.createElement("th", null, "Conv"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.kickY + b.retY - (a.kickY + a.retY)).map(t => /*#__PURE__*/React.createElement("tr", {
+  }, t.pbu))))), view === "st" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Kicks"), /*#__PURE__*/React.createElement("th", null, "KYds"), /*#__PURE__*/React.createElement("th", null, "Ret"), /*#__PURE__*/React.createElement("th", null, "RYds"), /*#__PURE__*/React.createElement("th", null, "FG"), /*#__PURE__*/React.createElement("th", null, "Conv"), /*#__PURE__*/React.createElement("th", null, "Blk"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.kickY + b.retY - (a.kickY + a.retY)).map(t => /*#__PURE__*/React.createElement("tr", {
     key: t.id
   }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", t.num), " ", t.name), /*#__PURE__*/React.createElement("td", {
     className: "n"
@@ -3482,7 +3536,9 @@ function SeasonTab({
     className: "n"
   }, t.fga ? t.fgm + "/" + t.fga : "—"), /*#__PURE__*/React.createElement("td", {
     className: "n"
-  }, t.convA ? t.convM + "/" + t.convA : "—"))))), /*#__PURE__*/React.createElement("div", {
+  }, t.convA ? t.convM + "/" + t.convA : "—"), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, t.blk))))), /*#__PURE__*/React.createElement("div", {
     className: "sechd"
   }, /*#__PURE__*/React.createElement("div", {
     className: "h2"

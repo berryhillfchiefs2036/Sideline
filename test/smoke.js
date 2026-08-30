@@ -596,6 +596,31 @@ const type = (el, val) => {
   click(byText(".nav button", "Game"));
   await flush();
 
+  console.log("\ndefending their try");
+  click(byText(".tick", "TD+"));
+  await flush();
+  ok("failed-try options offered", !!byText(".opt", "Try stopped") && !!byText(".opt", "Kick blocked"));
+  click(byText(".opt", "Kick blocked"));
+  await flush();
+  const credSel = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Who gets the credit");
+  ok("credit picker offered", !!credSel);
+  const nicoOpt = Array.from(credSel.options).find((o) => o.textContent.indexOf("Nico") >= 0);
+  sSetter.call(credSel, nicoOpt.value);
+  credSel.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Log the stop"));
+  await flush();
+  ok("their score unchanged after the block", $$(".score-num")[1].textContent === "8");
+  ok("block shows in the play log", !!byText(".logline", "blocked the kick"));
+  click(byText(".nav button", "Stats"));
+  await flush();
+  click(byText(".stbar button", "Special"));
+  await flush();
+  const nicoRow = $$("tbody tr").find((r) => r.textContent.indexOf("Nico") >= 0);
+  ok("blocked kick credited", nicoRow && nicoRow.querySelectorAll("td")[7].textContent === "1");
+  click(byText(".nav button", "Game"));
+  await flush();
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);
