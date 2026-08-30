@@ -274,6 +274,26 @@ const type = (el, val) => {
   await flush();
   ok("picking 25 updates the scoreboard", $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("& 25") >= 0);
 
+  console.log("\nend game button");
+  ok("no end-game button on an empty board", !byText(".abtn", "End game"));
+  const endCard = $$(".pcard").find((c) => c.querySelector(".plate").textContent !== "—");
+  click(endCard.querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "Ran it"));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  ok("end-game button appears once plays exist", !!byText(".abtn", "End game"));
+  click(byText(".abtn", "End game"));
+  await flush();
+  ok("board reset after ending the game", $(".dd-sub").textContent.indexOf("0 plays") >= 0);
+  click(byText(".nav button", "Season"));
+  await flush();
+  const bearsRow = byText(".row", "vs Bears");
+  ok("scheduled game stamped with the final score", bearsRow && bearsRow.textContent.indexOf("final 0–0") >= 0);
+  click(byText(".nav button", "Game"));
+  await flush();
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

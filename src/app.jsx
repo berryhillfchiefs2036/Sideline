@@ -479,6 +479,28 @@ function Sideline() {
       : new Date().toISOString();
     S.archiveGame({ id: uid(), endedAt, opponent: opponent || "",
       us: game.us, them: game.them, playsCount: game.plays.length, plays: game.plays, players });
+    /* If this board was tracking a scheduled game, stamp that schedule entry
+       as completed with the final score. */
+    const schedId = (game.gameInfo || {}).schedId;
+    if (schedId) setSquad((s) => Object.assign({}, s, {
+      schedule: (s.schedule || []).map((g) => (g.id === schedId
+        ? Object.assign({}, g, { done: true, us: game.us, them: game.them }) : g)),
+    }));
+  };
+
+  const endGame = () => {
+    const msg = code
+      ? "End this game for all coaches? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put."
+      : "End this game? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put.";
+    if (!window.confirm(msg)) return;
+    if (game.plays.length > 0) {
+      const info = game.gameInfo || {};
+      const opp = window.prompt("Who was this game against? (optional)", info.opponent || "") || "";
+      const when = window.prompt("What date was it played? (YYYY-MM-DD)",
+        info.date || new Date().toISOString().slice(0, 10)) || "";
+      archive(opp, when);
+    }
+    addOp({ type: "reset" });
   };
   /* Tapping a scheduled game tags the live board with it: plays logged from
      here on archive under that opponent and date. The tag is an op, so it
@@ -519,10 +541,10 @@ function Sideline() {
         </button>
 
         {tab === "game" && <GameTab {...{ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay,
-          undo, canUndo: !!lastUndoable, roster, moving, setMoving, assign }} />}
+          undo, canUndo: !!lastUndoable, roster, moving, setMoving, assign, onEndGame: endGame }} />}
         {tab === "roster" && <RosterTab squad={squad} setSquad={setSquad} statOf={statOf} />}
         {tab === "lineups" && <LineupsTab squad={squad} setSquad={setSquad} />}
-        {tab === "stats" && <StatsTab {...{ roster, statOf, minPlays, game, addOp, code }} onArchive={archive} />}
+        {tab === "stats" && <StatsTab {...{ roster, statOf, minPlays, game }} onEndGame={endGame} />}
         {tab === "season" && <SeasonTab games={S.games} squad={squad} setSquad={setSquad}
           onEdit={S.editGame} onRemove={S.removeGame} onImport={S.importGames} onTrack={trackScheduled} />}
       </div>
@@ -549,7 +571,7 @@ function Sideline() {
 
 /* ============================ GAME TAB ============================ */
 
-function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay, undo, canUndo, roster, moving, setMoving, assign }) {
+function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay, undo, canUndo, roster, moving, setMoving, assign, onEndGame }) {
   const set = (field, value) => addOp({ type: "set", field, value });
   const filled = onField.filter((s) => s.playerId).length;
   const movingSlot = moving ? onField.find((s) => s.id === moving) : null;
@@ -684,6 +706,10 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
       </div>
 
       <PlayLog game={game} byId={byId} addOp={addOp} />
+      {game.plays.length > 0 && (
+        <button className="abtn" style={{ width: "100%", marginTop: 12 }} onClick={onEndGame}>
+          End game — save it to the Season</button>
+      )}
     </React.Fragment>
   );
 }
@@ -1138,7 +1164,7 @@ function LineupsTab({ squad, setSquad }) {
 
 /* ============================ STATS ============================ */
 
-function StatsTab({ roster, statOf, minPlays, game, addOp, code, onArchive }) {
+function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
   const [view, setView] = useState("plays");
   const rows = roster.map((p) => ({ p, s: statOf(p.id) }));
 
@@ -1227,20 +1253,7 @@ function StatsTab({ roster, statOf, minPlays, game, addOp, code, onArchive }) {
       <div className="sechd"><div className="h2">After the game</div></div>
       <div className="actionbar" style={{ marginTop: 0 }}>
         <button className="abtn" onClick={exportCsv}>Download stats</button>
-        <button className="abtn ghost" onClick={() => {
-          const msg = code
-            ? "End this game for all coaches? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put."
-            : "End this game? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put.";
-          if (!window.confirm(msg)) return;
-          if (game.plays.length > 0) {
-            const info = game.gameInfo || {};
-            const opp = window.prompt("Who was this game against? (optional)", info.opponent || "") || "";
-            const when = window.prompt("What date was it played? (YYYY-MM-DD)",
-              info.date || new Date().toISOString().slice(0, 10)) || "";
-            onArchive(opp, when);
-          }
-          addOp({ type: "reset" });
-        }}>Start a new game</button>
+        <button className="abtn ghost" onClick={onEndGame}>Start a new game</button>
       </div>
     </React.Fragment>
   );
@@ -1294,10 +1307,11 @@ function ScheduleSection({ squad, setSquad, onTrack }) {
       {sched.map((g) => {
         const past = g.date < todayKey;
         return (
-          <div className="row" key={g.id} style={past ? { opacity: 0.55 } : null}>
+          <div className="row" key={g.id} style={past || g.done ? { opacity: 0.55 } : null}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 15 }}>vs {g.opponent}</div>
-              <div className="eyebrow">{fmtDate(g.date)} · {fmtTime(g.time)}{past ? " · played" : ""}</div>
+              <div className="eyebrow">{fmtDate(g.date)} · {fmtTime(g.time)}
+                {g.done ? " · final " + g.us + "–" + g.them : past ? " · played" : ""}</div>
             </div>
             <button className="mini dark" onClick={() => onTrack(g)}>Add stats</button>
             <button className="mini" onClick={() => {

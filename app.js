@@ -831,6 +831,29 @@ function Sideline() {
       plays: game.plays,
       players
     });
+    /* If this board was tracking a scheduled game, stamp that schedule entry
+       as completed with the final score. */
+    const schedId = (game.gameInfo || {}).schedId;
+    if (schedId) setSquad(s => Object.assign({}, s, {
+      schedule: (s.schedule || []).map(g => g.id === schedId ? Object.assign({}, g, {
+        done: true,
+        us: game.us,
+        them: game.them
+      }) : g)
+    }));
+  };
+  const endGame = () => {
+    const msg = code ? "End this game for all coaches? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put." : "End this game? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put.";
+    if (!window.confirm(msg)) return;
+    if (game.plays.length > 0) {
+      const info = game.gameInfo || {};
+      const opp = window.prompt("Who was this game against? (optional)", info.opponent || "") || "";
+      const when = window.prompt("What date was it played? (YYYY-MM-DD)", info.date || new Date().toISOString().slice(0, 10)) || "";
+      archive(opp, when);
+    }
+    addOp({
+      type: "reset"
+    });
   };
   /* Tapping a scheduled game tags the live board with it: plays logged from
      here on archive under that opponent and date. The tag is an op, so it
@@ -896,7 +919,8 @@ function Sideline() {
     roster,
     moving,
     setMoving,
-    assign
+    assign,
+    onEndGame: endGame
   }), tab === "roster" && /*#__PURE__*/React.createElement(RosterTab, {
     squad: squad,
     setSquad: setSquad,
@@ -909,9 +933,7 @@ function Sideline() {
     statOf,
     minPlays,
     game,
-    addOp,
-    code,
-    onArchive: archive
+    onEndGame: endGame
   }), tab === "season" && /*#__PURE__*/React.createElement(SeasonTab, {
     games: S.games,
     squad: squad,
@@ -972,7 +994,8 @@ function GameTab({
   roster,
   moving,
   setMoving,
-  assign
+  assign,
+  onEndGame
 }) {
   const set = (field, value) => addOp({
     type: "set",
@@ -1183,7 +1206,14 @@ function GameTab({
     game: game,
     byId: byId,
     addOp: addOp
-  }));
+  }), game.plays.length > 0 && /*#__PURE__*/React.createElement("button", {
+    className: "abtn",
+    style: {
+      width: "100%",
+      marginTop: 12
+    },
+    onClick: onEndGame
+  }, "End game \u2014 save it to the Season"));
 }
 function Chain({
   count,
@@ -2013,9 +2043,7 @@ function StatsTab({
   statOf,
   minPlays,
   game,
-  addOp,
-  code,
-  onArchive
+  onEndGame
 }) {
   const [view, setView] = useState("plays");
   const rows = roster.map(p => ({
@@ -2133,19 +2161,7 @@ function StatsTab({
     onClick: exportCsv
   }, "Download stats"), /*#__PURE__*/React.createElement("button", {
     className: "abtn ghost",
-    onClick: () => {
-      const msg = code ? "End this game for all coaches? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put." : "End this game? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put.";
-      if (!window.confirm(msg)) return;
-      if (game.plays.length > 0) {
-        const info = game.gameInfo || {};
-        const opp = window.prompt("Who was this game against? (optional)", info.opponent || "") || "";
-        const when = window.prompt("What date was it played? (YYYY-MM-DD)", info.date || new Date().toISOString().slice(0, 10)) || "";
-        onArchive(opp, when);
-      }
-      addOp({
-        type: "reset"
-      });
-    }
+    onClick: onEndGame
   }, "Start a new game")));
 }
 
@@ -2245,7 +2261,7 @@ function ScheduleSection({
     return /*#__PURE__*/React.createElement("div", {
       className: "row",
       key: g.id,
-      style: past ? {
+      style: past || g.done ? {
         opacity: 0.55
       } : null
     }, /*#__PURE__*/React.createElement("div", {
@@ -2260,7 +2276,7 @@ function ScheduleSection({
       }
     }, "vs ", g.opponent), /*#__PURE__*/React.createElement("div", {
       className: "eyebrow"
-    }, fmtDate(g.date), " \xB7 ", fmtTime(g.time), past ? " · played" : "")), /*#__PURE__*/React.createElement("button", {
+    }, fmtDate(g.date), " \xB7 ", fmtTime(g.time), g.done ? " · final " + g.us + "–" + g.them : past ? " · played" : "")), /*#__PURE__*/React.createElement("button", {
       className: "mini dark",
       onClick: () => onTrack(g)
     }, "Add stats"), /*#__PURE__*/React.createElement("button", {
