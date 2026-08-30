@@ -138,6 +138,8 @@ function fold(ops) {
   /* Amends can move a play's timestamp, so order by effective time. */
   live.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
   const lastReset = live.map((o) => o.type).lastIndexOf("reset");
+  /* Remembered so the last End game can be undone — reopening that game. */
+  const lastResetId = lastReset >= 0 ? live[lastReset].id : null;
   if (lastReset >= 0) live = live.slice(lastReset + 1);
 
   const g = BASE();
@@ -212,6 +214,7 @@ function fold(ops) {
     }
   });
   g.live = live;
+  g.lastResetId = lastResetId;
   g.playCount = g.plays.filter((p) => p.type !== "pen").length;
   return g;
 }
@@ -680,6 +683,20 @@ function Sideline() {
     setMovingPlay(null);
   };
 
+  /* The most recently ended game can be reopened — but only until the next
+     game's first play, so two games' plays can never merge. */
+  const newestArchived = S.games.length
+    ? S.games.slice().sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1))[0] : null;
+  const reopenableId = game.playCount === 0 && game.plays.length === 0 && game.lastResetId && newestArchived
+    ? newestArchived.id : null;
+  const reopenGame = (rec) => {
+    if (!reopenableId || rec.id !== reopenableId) return;
+    if (!window.confirm("Reopen this game on the board? Every play comes back, fully editable, and it leaves the Season list until you end the game again.")) return;
+    addOp({ type: "undo", targets: [game.lastResetId] });
+    S.removeGame(rec.id);
+    setTab("game");
+  };
+
   const lastUndoable = game.live.slice().reverse().find((o) => ["play", "pen", "sub", "adj", "set"].indexOf(o.type) >= 0);
   const undo = () => {
     if (!lastUndoable) return;
@@ -711,7 +728,8 @@ function Sideline() {
         {tab === "lineups" && <LineupsTab squad={squad} setSquad={setSquad} />}
         {tab === "stats" && <StatsTab {...{ roster, statOf, minPlays, game }} onEndGame={endGame} />}
         {tab === "season" && <SeasonTab games={S.games} squad={squad} setSquad={setSquad}
-          onEdit={S.editGame} onRemove={S.removeGame} onImport={S.importGames} onTrack={trackScheduled} />}
+          onEdit={S.editGame} onRemove={S.removeGame} onImport={S.importGames} onTrack={trackScheduled}
+          reopenableId={reopenableId} onReopen={reopenGame} />}
       </div>
 
       {sheet && sheet.type === "play" && (
@@ -2347,7 +2365,7 @@ function ScheduleSection({ squad, setSquad, onTrack }) {
   );
 }
 
-function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack }) {
+function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack, reopenableId, onReopen }) {
   const [year, setYear] = useState("all");
   const [view, setView] = useState("plays");
   const [editingGame, setEditingGame] = useState(null);
@@ -2546,6 +2564,9 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
                   {new Date(g.endedAt).toLocaleDateString()} · {g.playsCount} plays{g.pending ? " · waiting to upload" : ""}
                 </div>
               </div>
+              {g.id === reopenableId && (
+                <button className="mini dark" onClick={() => onReopen(g)}>Reopen</button>
+              )}
               <button className="mini" onClick={() => setEditingGame({ id: g.id, opponent: g.opponent || "",
                 date: (g.endedAt || "").slice(0, 10), us: String(g.us), them: String(g.them) })}>Edit</button>
               <button className="mini" onClick={() => {

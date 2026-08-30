@@ -868,6 +868,25 @@ const type = (el, val) => {
     w2.document.querySelectorAll(".nav").length === 0 &&
     w2.document.querySelectorAll(".tick").length === 0);
 
+  console.log("\nreopen an ended game");
+  const playsBeforeEnd = $(".dd-sub").textContent;
+  click(byText(".abtn", "End game"));
+  await flush();
+  ok("board reset after ending the game again", $(".dd-sub").textContent.indexOf("0 plays") >= 0);
+  click(byText(".nav button", "Season"));
+  await flush();
+  ok("reopen offered on the newest archived game", !!byText(".mini", "Reopen"));
+  click(byText(".mini", "Reopen"));
+  await flush();
+  ok("reopened game restored its plays", $(".dd-sub").textContent === playsBeforeEnd);
+  ok("play log came back editable", $$(".logline").length > 0 &&
+    !!$(".logline [aria-label='Edit this play']"));
+  click(byText(".nav button", "Season"));
+  await flush();
+  ok("reopened game left the season list", !byText(".mini", "Reopen"));
+  click(byText(".nav button", "Game"));
+  await flush();
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

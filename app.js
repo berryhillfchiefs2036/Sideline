@@ -352,6 +352,8 @@ function fold(ops) {
   /* Amends can move a play's timestamp, so order by effective time. */
   live.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
   const lastReset = live.map(o => o.type).lastIndexOf("reset");
+  /* Remembered so the last End game can be undone — reopening that game. */
+  const lastResetId = lastReset >= 0 ? live[lastReset].id : null;
   if (lastReset >= 0) live = live.slice(lastReset + 1);
   const g = BASE();
   live.forEach(o => {
@@ -455,6 +457,7 @@ function fold(ops) {
     }
   });
   g.live = live;
+  g.lastResetId = lastResetId;
   g.playCount = g.plays.filter(p => p.type !== "pen").length;
   return g;
 }
@@ -1215,6 +1218,21 @@ function Sideline() {
     }
     setMovingPlay(null);
   };
+
+  /* The most recently ended game can be reopened — but only until the next
+     game's first play, so two games' plays can never merge. */
+  const newestArchived = S.games.length ? S.games.slice().sort((a, b) => a.endedAt < b.endedAt ? 1 : -1)[0] : null;
+  const reopenableId = game.playCount === 0 && game.plays.length === 0 && game.lastResetId && newestArchived ? newestArchived.id : null;
+  const reopenGame = rec => {
+    if (!reopenableId || rec.id !== reopenableId) return;
+    if (!window.confirm("Reopen this game on the board? Every play comes back, fully editable, and it leaves the Season list until you end the game again.")) return;
+    addOp({
+      type: "undo",
+      targets: [game.lastResetId]
+    });
+    S.removeGame(rec.id);
+    setTab("game");
+  };
   const lastUndoable = game.live.slice().reverse().find(o => ["play", "pen", "sub", "adj", "set"].indexOf(o.type) >= 0);
   const undo = () => {
     if (!lastUndoable) return;
@@ -1290,7 +1308,9 @@ function Sideline() {
     onEdit: S.editGame,
     onRemove: S.removeGame,
     onImport: S.importGames,
-    onTrack: trackScheduled
+    onTrack: trackScheduled,
+    reopenableId: reopenableId,
+    onReopen: reopenGame
   })), sheet && sheet.type === "play" && /*#__PURE__*/React.createElement(PlaySheet, {
     slot: sheet.slot,
     player: byId[sheet.slot.playerId],
@@ -4075,7 +4095,9 @@ function SeasonTab({
   onEdit,
   onRemove,
   onImport,
-  onTrack
+  onTrack,
+  reopenableId,
+  onReopen
 }) {
   const [year, setYear] = useState("all");
   const [view, setView] = useState("plays");
@@ -4337,7 +4359,10 @@ function SeasonTab({
     }
   }, g.us > g.them ? "W" : g.us < g.them ? "L" : "T"), " ", g.opponent ? "vs " + g.opponent : "Game"), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, new Date(g.endedAt).toLocaleDateString(), " \xB7 ", g.playsCount, " plays", g.pending ? " · waiting to upload" : "")), /*#__PURE__*/React.createElement("button", {
+  }, new Date(g.endedAt).toLocaleDateString(), " \xB7 ", g.playsCount, " plays", g.pending ? " · waiting to upload" : "")), g.id === reopenableId && /*#__PURE__*/React.createElement("button", {
+    className: "mini dark",
+    onClick: () => onReopen(g)
+  }, "Reopen"), /*#__PURE__*/React.createElement("button", {
     className: "mini",
     onClick: () => setEditingGame({
       id: g.id,
