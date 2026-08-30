@@ -1415,6 +1415,9 @@ function Sideline() {
      here on archive under that opponent and date. The tag is an op, so it
      syncs to the whole crew and clears with the next board reset. */
   const trackScheduled = g => {
+    /* A game already marked final lives on the Season list — re-tracking it
+       would start a second copy of it on the live board. */
+    if (g.done && !window.confirm("This game is already final (" + (g.us || 0) + "–" + (g.them || 0) + "). Tracking it again starts a brand-new game on the board — to see or fix the finished one, " + "use Stats or Reopen on the Season list. Track it again anyway?")) return;
     const info = game.gameInfo || {};
     if (game.plays.length > 0 && info.schedId !== g.id) {
       if (!window.confirm("The board already has " + game.plays.length + " plays" + (info.opponent ? " (vs " + info.opponent + ")" : "") + ". OK tags them all as the " + (g.opponent || "scheduled") + " game — or Cancel and finish the other game first on the Stats tab.")) return;
@@ -1892,17 +1895,24 @@ function GameTab({
     onClick: () => setSheet({
       type: "spot"
     })
-  }, game.spot != null ? "◉ " + spotLabel(game.spot) : "Ball spot"))), game.gameInfo && game.gameInfo.opponent && /*#__PURE__*/React.createElement("div", {
+  }, game.spot != null ? "◉ " + spotLabel(game.spot) : "Ball spot"))), game.gameInfo && /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       textAlign: "center",
       marginTop: 8
     }
-  }, "Tracking vs ", game.gameInfo.opponent, game.gameInfo.date ? " · " + new Date(game.gameInfo.date + "T12:00:00").toLocaleDateString(undefined, {
+  }, game.gameInfo.opponent ? /*#__PURE__*/React.createElement(React.Fragment, null, "Tracking vs ", game.gameInfo.opponent, game.gameInfo.date ? " · " + new Date(game.gameInfo.date + "T12:00:00").toLocaleDateString(undefined, {
     weekday: "short",
     month: "short",
     day: "numeric"
-  }) : "", game.gameInfo.scrim ? " · scrimmage" : ""), !needsGame && /*#__PURE__*/React.createElement("div", {
+  }) : "", game.gameInfo.scrim ? " · scrimmage" : "") : "Tracking an unscheduled game", game.playCount === 0 && game.plays.length === 0 && /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    style: {
+      marginLeft: 8,
+      padding: "2px 8px"
+    },
+    onClick: () => set("gameInfo", null)
+  }, "Pick a different game")), !needsGame && /*#__PURE__*/React.createElement("div", {
     className: "units"
   }, UNITS.map(u => /*#__PURE__*/React.createElement("button", {
     key: u.key,
@@ -4485,7 +4495,7 @@ function ScheduleSection({
       }
     }, "vs ", g.opponent), /*#__PURE__*/React.createElement("div", {
       className: "eyebrow"
-    }, fmtDate(g.date), " \xB7 ", fmtTime(g.time), g.scrim ? " · scrimmage" : "", g.done ? " · final " + g.us + "–" + g.them : past ? " · played" : "")), /*#__PURE__*/React.createElement("button", {
+    }, fmtDate(g.date), " \xB7 ", fmtTime(g.time), g.scrim ? " · scrimmage" : "", g.done ? " · final " + g.us + "–" + g.them : past ? " · played" : "")), !g.done && /*#__PURE__*/React.createElement("button", {
       className: "mini dark",
       onClick: () => onTrack(g)
     }, "Add stats"), /*#__PURE__*/React.createElement("button", {

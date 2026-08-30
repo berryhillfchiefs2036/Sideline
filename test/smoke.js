@@ -289,6 +289,13 @@ const type = (el, val) => {
   await flush();
   ok("jumped to the game board", !!$(".board"));
   ok("board tagged with the scheduled opponent", $(".sl").textContent.indexOf("Tracking vs Bears") >= 0);
+  ok("empty tagged board offers a way to pick again", !!byText(".mini", "Pick a different game"));
+  click(byText(".mini", "Pick a different game"));
+  await flush();
+  ok("clearing the tag brings the picker back", !!byText(".abtn", "Track without a scheduled game"));
+  click(byText(".mini", "Start this game"));
+  await flush();
+  ok("re-picked the scheduled game from the board", $(".sl").textContent.indexOf("Tracking vs Bears") >= 0);
 
   console.log("\ndistance dropdown");
   click(byText(".nav button", "Game"));
@@ -1115,6 +1122,9 @@ const type = (el, val) => {
   click(byText(".nav button", "Season"));
   await flush();
   ok("scrimmage stays out of the record", $(".dd-main").textContent === "1–1–1");
+  const psRow = byText(".row", "Practice Squad");
+  ok("final scheduled games stop offering Add stats",
+    !!psRow && !Array.from(psRow.querySelectorAll(".mini")).some((b) => b.textContent === "Add stats"));
   ok("scrimmage game listed and tagged", $$(".row").some((r) => r.querySelector(".plate") &&
     r.querySelector(".plate").textContent === "6–0" && r.textContent.indexOf("scrimmage") >= 0));
 
