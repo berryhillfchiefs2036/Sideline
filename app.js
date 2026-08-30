@@ -1011,11 +1011,19 @@ function GameTab({
     onClick: () => set("down", d)
   }, ORD[d]))), /*#__PURE__*/React.createElement("div", {
     className: "board-btm"
-  }, [1, 2, 3, 5, 10, 15].map(d => /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement("select", {
+    className: "dist-sel",
+    "aria-label": "Distance to gain",
+    value: game.distance,
+    onChange: e => set("distance", parseInt(e.target.value, 10))
+  }, Array.from({
+    length: 40
+  }, (_, i) => i + 1).map(d => /*#__PURE__*/React.createElement("option", {
     key: d,
-    className: "chip" + (game.distance === d ? " on" : ""),
-    onClick: () => set("distance", d)
-  }, d)), /*#__PURE__*/React.createElement("button", {
+    value: d
+  }, d, " ", d === 1 ? "yard" : "yards", " to go")), game.distance > 40 && /*#__PURE__*/React.createElement("option", {
+    value: game.distance
+  }, game.distance, " yards to go")), /*#__PURE__*/React.createElement("button", {
     className: "chip",
     onClick: () => set("quarter", game.quarter % 4 + 1)
   }, "Q", game.quarter))), /*#__PURE__*/React.createElement("div", {

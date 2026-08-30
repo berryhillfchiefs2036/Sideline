@@ -204,6 +204,17 @@ const type = (el, val) => {
   ok("season totals carry Jordan's snap", jordanRow && jordanRow.querySelectorAll("td")[5].textContent === "1");
   ok("games saved to localStorage", JSON.parse(store["sideline.solo.games"] || "[]").length === 1);
 
+  console.log("\ndistance dropdown");
+  click(byText(".nav button", "Game"));
+  await flush();
+  const distSel = $(".dist-sel");
+  ok("distance dropdown lists 1 to 40", !!distSel && distSel.options.length === 40 &&
+    distSel.options[0].value === "1" && distSel.options[39].value === "40");
+  sSetter.call(distSel, "25");
+  distSel.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  ok("picking 25 updates the scoreboard", $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("& 25") >= 0);
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

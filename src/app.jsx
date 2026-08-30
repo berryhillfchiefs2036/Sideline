@@ -560,9 +560,13 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
           ))}
         </div>
         <div className="board-btm">
-          {[1, 2, 3, 5, 10, 15].map((d) => (
-            <button key={d} className={"chip" + (game.distance === d ? " on" : "")} onClick={() => set("distance", d)}>{d}</button>
-          ))}
+          <select className="dist-sel" aria-label="Distance to gain" value={game.distance}
+            onChange={(e) => set("distance", parseInt(e.target.value, 10))}>
+            {Array.from({ length: 40 }, (_, i) => i + 1).map((d) => (
+              <option key={d} value={d}>{d} {d === 1 ? "yard" : "yards"} to go</option>
+            ))}
+            {game.distance > 40 && <option value={game.distance}>{game.distance} yards to go</option>}
+          </select>
           <button className="chip" onClick={() => set("quarter", (game.quarter % 4) + 1)}>Q{game.quarter}</button>
         </div>
       </div>
