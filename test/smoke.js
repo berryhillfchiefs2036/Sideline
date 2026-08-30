@@ -185,6 +185,21 @@ const type = (el, val) => {
   ok("1 yard on 1st & 10 becomes 2nd & 9",
     $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("2nd & 9") >= 0);
 
+  console.log("\nremove a logged play");
+  click($(".logline .mini"));
+  await flush();
+  ok("removed play rewinds the down", $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("1st & 10") >= 0);
+  ok("play counter went back down", $(".dd-sub").textContent.indexOf("1 plays") >= 0);
+  const cardAgain = $$(".pcard").find((c) => c.querySelector(".plate").textContent !== "—");
+  click(cardAgain.querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "Ran it"));
+  click(byText(".yardrow button", "+1"));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  ok("re-logged the play correctly", $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("2nd & 9") >= 0);
+
   console.log("\ntouchdown scoring");
   const c2 = $$(".pcard").find((c) => c.querySelector(".plate").textContent !== "—");
   click(c2.querySelector(".pc-top"));
@@ -216,6 +231,17 @@ const type = (el, val) => {
   const jordanRow = $$("tbody tr").find((r) => r.textContent.indexOf("Jordan") >= 0);
   ok("season totals carry Jordan's snap", jordanRow && jordanRow.querySelectorAll("td")[5].textContent === "1");
   ok("games saved to localStorage", JSON.parse(store["sideline.solo.games"] || "[]").length === 1);
+
+  console.log("\nedit an archived game");
+  const archRow = byText(".row", "vs Eagles");
+  click(Array.from(archRow.querySelectorAll(".mini")).find((b) => b.textContent === "Edit"));
+  await flush();
+  const usInp = $$(".row input").find((i) => i.getAttribute("aria-label") === "Our score");
+  ok("game edit opens with the score", !!usInp && usInp.value === "6");
+  type(usInp, "7");
+  click(byText(".mini", "Save"));
+  await flush();
+  ok("score change saved on the archived game", !!byText(".row", "7–0"));
 
   console.log("\nschedule");
   type($(".sched-date"), "2026-09-12");

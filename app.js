@@ -505,14 +505,13 @@ function useSideline() {
       }) : g));
     });
   }, [code, mutateGames, pushGame]);
-  const renameGame = useCallback((id, opponent) => {
-    mutateGames(prev => prev.map(g => g.id === id ? Object.assign({}, g, {
-      opponent
-    }) : g));
+
+  /* Patch any fields of an archived game (opponent, endedAt, scores) and
+     re-upload it, so past games stay editable forever. */
+  const editGame = useCallback((id, patch) => {
+    mutateGames(prev => prev.map(g => g.id === id ? Object.assign({}, g, patch) : g));
     const rec = games.find(g => g.id === id);
-    if (rec && code && sb) pushGame(Object.assign({}, rec, {
-      opponent
-    }));
+    if (rec && code && sb) pushGame(Object.assign({}, rec, patch));
   }, [games, code, mutateGames, pushGame]);
   const removeGame = useCallback(id => {
     mutateGames(prev => prev.filter(g => g.id !== id));
@@ -735,7 +734,7 @@ function useSideline() {
     crewAvailable: CREW_ON,
     games,
     archiveGame,
-    renameGame,
+    editGame,
     removeGame,
     importGames
   };
@@ -812,20 +811,24 @@ function Sideline() {
     });
     setSheet(null);
   };
-  const archive = opponent => {
+  const archive = (opponent, when) => {
     const players = roster.map(p => ({
       id: p.id,
       num: p.num,
       name: p.name,
       s: statOf(p.id)
     })).filter(r => r.s.snaps > 0);
+    /* Games logged after the fact get archived under the date they were
+       actually played, not the date they were typed in. */
+    const endedAt = /^\d{4}-\d{2}-\d{2}$/.test((when || "").trim()) ? new Date(when.trim() + "T12:00:00").toISOString() : new Date().toISOString();
     S.archiveGame({
       id: uid(),
-      endedAt: new Date().toISOString(),
+      endedAt,
       opponent: opponent || "",
       us: game.us,
       them: game.them,
       playsCount: game.plays.length,
+      plays: game.plays,
       players
     });
   };
@@ -894,7 +897,7 @@ function Sideline() {
     games: S.games,
     squad: squad,
     setSquad: setSquad,
-    onRename: S.renameGame,
+    onEdit: S.editGame,
     onRemove: S.removeGame,
     onImport: S.importGames
   })), sheet && sheet.type === "play" && /*#__PURE__*/React.createElement(PlaySheet, {
@@ -1148,7 +1151,8 @@ function GameTab({
     onClick: undo
   }, "Undo")), /*#__PURE__*/React.createElement(PlayLog, {
     game: game,
-    byId: byId
+    byId: byId,
+    addOp: addOp
   }));
 }
 function Chain({
@@ -1174,7 +1178,8 @@ function Chain({
 }
 function PlayLog({
   game,
-  byId
+  byId,
+  addOp
 }) {
   const recent = game.plays.slice(-14).reverse();
   if (!recent.length) return null;
@@ -1199,7 +1204,22 @@ function PlayLog({
       }
     }, " \xB7 ", sc.label)), /*#__PURE__*/React.createElement("span", {
       className: "who"
-    }, p.byName || ""));
+    }, p.byName || ""), /*#__PURE__*/React.createElement("button", {
+      className: "mini",
+      style: {
+        flex: "0 0 auto",
+        padding: "2px 8px"
+      },
+      "aria-label": "Remove this play",
+      onClick: () => {
+        if (window.confirm("Take this play out? The score, down, and stats recalculate without it — you can re-log it right.")) {
+          addOp({
+            type: "undo",
+            targets: [p.id]
+          });
+        }
+      }
+    }, "\u2715"));
   })));
 }
 
@@ -2086,7 +2106,11 @@ function StatsTab({
     onClick: () => {
       const msg = code ? "End this game for all coaches? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put." : "End this game? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put.";
       if (!window.confirm(msg)) return;
-      if (game.plays.length > 0) onArchive(window.prompt("Who was this game against? (optional)", "") || "");
+      if (game.plays.length > 0) {
+        const opp = window.prompt("Who was this game against? (optional)", "") || "";
+        const when = window.prompt("What date was it played? (YYYY-MM-DD)", new Date().toISOString().slice(0, 10)) || "";
+        onArchive(opp, when);
+      }
       addOp({
         type: "reset"
       });
@@ -2216,13 +2240,27 @@ function SeasonTab({
   games,
   squad,
   setSquad,
-  onRename,
+  onEdit,
   onRemove,
   onImport
 }) {
   const [year, setYear] = useState("all");
   const [view, setView] = useState("plays");
+  const [editingGame, setEditingGame] = useState(null);
   const fileRef = useRef(null);
+  const saveGameEdit = () => {
+    if (!editingGame) return;
+    const patch = {
+      opponent: editingGame.opponent.trim(),
+      us: Math.max(0, parseInt(editingGame.us, 10) || 0),
+      them: Math.max(0, parseInt(editingGame.them, 10) || 0)
+    };
+    if (/^\d{4}-\d{2}-\d{2}$/.test(editingGame.date)) {
+      patch.endedAt = new Date(editingGame.date + "T12:00:00").toISOString();
+    }
+    onEdit(editingGame.id, patch);
+    setEditingGame(null);
+  };
   const years = useMemo(() => {
     const ys = {};
     games.forEach(g => {
@@ -2332,7 +2370,71 @@ function SeasonTab({
     className: "h2"
   }, "Games"), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, "Latest first")), newest.map(g => /*#__PURE__*/React.createElement("div", {
+  }, "Latest first")), newest.map(g => editingGame && editingGame.id === g.id ? /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    key: g.id,
+    style: {
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    style: {
+      flex: "1 1 100%"
+    },
+    placeholder: "Opponent",
+    value: editingGame.opponent,
+    onChange: e => setEditingGame(Object.assign({}, editingGame, {
+      opponent: e.target.value
+    }))
+  }), /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    type: "date",
+    "aria-label": "Game date",
+    style: {
+      flex: "1 1 46%",
+      minWidth: 130
+    },
+    value: editingGame.date,
+    onChange: e => setEditingGame(Object.assign({}, editingGame, {
+      date: e.target.value
+    }))
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: "1 1 46%",
+      display: "flex",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    inputMode: "numeric",
+    "aria-label": "Our score",
+    value: editingGame.us,
+    onChange: e => setEditingGame(Object.assign({}, editingGame, {
+      us: e.target.value
+    }))
+  }), /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    inputMode: "numeric",
+    "aria-label": "Their score",
+    value: editingGame.them,
+    onChange: e => setEditingGame(Object.assign({}, editingGame, {
+      them: e.target.value
+    }))
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "mini dark",
+    style: {
+      flex: 1,
+      padding: 10
+    },
+    onClick: saveGameEdit
+  }, "Save"), /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    style: {
+      flex: 1,
+      padding: 10
+    },
+    onClick: () => setEditingGame(null)
+  }, "Cancel")) : /*#__PURE__*/React.createElement("div", {
     className: "row",
     key: g.id
   }, /*#__PURE__*/React.createElement("div", {
@@ -2360,11 +2462,14 @@ function SeasonTab({
     className: "eyebrow"
   }, new Date(g.endedAt).toLocaleDateString(), " \xB7 ", g.playsCount, " plays", g.pending ? " · waiting to upload" : "")), /*#__PURE__*/React.createElement("button", {
     className: "mini",
-    onClick: () => {
-      const v = window.prompt("Opponent name", g.opponent || "");
-      if (v !== null) onRename(g.id, v);
-    }
-  }, "Name"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setEditingGame({
+      id: g.id,
+      opponent: g.opponent || "",
+      date: (g.endedAt || "").slice(0, 10),
+      us: String(g.us),
+      them: String(g.them)
+    })
+  }, "Edit"), /*#__PURE__*/React.createElement("button", {
     className: "mini",
     onClick: () => {
       if (window.confirm("Remove this game from the season? Its stats leave the totals.")) onRemove(g.id);
