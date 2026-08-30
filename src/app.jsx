@@ -906,6 +906,19 @@ function RosterTab({ squad, setSquad, statOf }) {
   const [num, setNum] = useState("");
   const [pos, setPos] = useState("");
   const [bulk, setBulk] = useState("");
+  const [editing, setEditing] = useState(null);
+
+  /* Edits keep the player's id, so career stats stay linked across seasons
+     (new jersey number, name fix) — never remove and re-add for that. */
+  const saveEdit = () => {
+    if (!editing || !editing.name.trim() || !editing.num.trim()) return;
+    setSquad((s) => Object.assign({}, s, {
+      roster: s.roster.map((p) => (p.id === editing.id
+        ? Object.assign({}, p, { num: editing.num.trim(), name: editing.name.trim(), pos: editing.pos.trim() })
+        : p)),
+    }));
+    setEditing(null);
+  };
 
   const add = () => {
     if (!name.trim() || !num.trim()) return;
@@ -960,16 +973,31 @@ function RosterTab({ squad, setSquad, statOf }) {
       </details>
 
       {sorted.length === 0 && <div className="empty-note">Add your first player above. Number and name are all you need.</div>}
-      {sorted.map((p) => (
+      {sorted.map((p) => (editing && editing.id === p.id ? (
+        <div className="row" key={p.id} style={{ flexWrap: "wrap" }}>
+          <input className="inp" style={{ flex: "0 0 68px" }} placeholder="#" inputMode="numeric" value={editing.num}
+            onChange={(e) => setEditing(Object.assign({}, editing, { num: e.target.value }))} />
+          <input className="inp" style={{ flex: 1, minWidth: 120 }} placeholder="Player name" value={editing.name}
+            onChange={(e) => setEditing(Object.assign({}, editing, { name: e.target.value }))}
+            onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); }} />
+          <input className="inp" style={{ flex: "1 1 100%" }} placeholder="Positions they can play (RB, LB…)" value={editing.pos}
+            onChange={(e) => setEditing(Object.assign({}, editing, { pos: e.target.value }))} />
+          <button className="mini dark" style={{ flex: 1, padding: 10 }} onClick={saveEdit}>Save</button>
+          <button className="mini" style={{ flex: 1, padding: 10 }} onClick={() => setEditing(null)}>Cancel</button>
+        </div>
+      ) : (
         <div className="row" key={p.id}>
           <div className="plate">{p.num}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 600, fontSize: 15 }}>{p.name}</div>
             <div className="eyebrow">{p.pos || "no positions listed"} · {statOf(p.id).snaps} plays</div>
           </div>
-          <button className="mini" onClick={() => remove(p.id)}>Remove</button>
+          <button className="mini" onClick={() => setEditing({ id: p.id, num: p.num, name: p.name, pos: p.pos || "" })}>Edit</button>
+          <button className="mini" onClick={() => {
+            if (window.confirm("Remove #" + p.num + " " + p.name + " from the roster? Season stats they already have stay saved, but re-adding them later counts as a new player. To change their number or name, use Edit instead.")) remove(p.id);
+          }}>Remove</button>
         </div>
-      ))}
+      )))}
 
       <div className="sechd"><div className="h2">Play minimum</div></div>
       <div className="row">

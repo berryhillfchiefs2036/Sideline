@@ -1572,6 +1572,21 @@ function RosterTab({
   const [num, setNum] = useState("");
   const [pos, setPos] = useState("");
   const [bulk, setBulk] = useState("");
+  const [editing, setEditing] = useState(null);
+
+  /* Edits keep the player's id, so career stats stay linked across seasons
+     (new jersey number, name fix) — never remove and re-add for that. */
+  const saveEdit = () => {
+    if (!editing || !editing.name.trim() || !editing.num.trim()) return;
+    setSquad(s => Object.assign({}, s, {
+      roster: s.roster.map(p => p.id === editing.id ? Object.assign({}, p, {
+        num: editing.num.trim(),
+        name: editing.name.trim(),
+        pos: editing.pos.trim()
+      }) : p)
+    }));
+    setEditing(null);
+  };
   const add = () => {
     if (!name.trim() || !num.trim()) return;
     setSquad(s => Object.assign({}, s, {
@@ -1685,7 +1700,62 @@ function RosterTab({
     onClick: addBulk
   }, "Add these players")), sorted.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "empty-note"
-  }, "Add your first player above. Number and name are all you need."), sorted.map(p => /*#__PURE__*/React.createElement("div", {
+  }, "Add your first player above. Number and name are all you need."), sorted.map(p => editing && editing.id === p.id ? /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    key: p.id,
+    style: {
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    style: {
+      flex: "0 0 68px"
+    },
+    placeholder: "#",
+    inputMode: "numeric",
+    value: editing.num,
+    onChange: e => setEditing(Object.assign({}, editing, {
+      num: e.target.value
+    }))
+  }), /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    style: {
+      flex: 1,
+      minWidth: 120
+    },
+    placeholder: "Player name",
+    value: editing.name,
+    onChange: e => setEditing(Object.assign({}, editing, {
+      name: e.target.value
+    })),
+    onKeyDown: e => {
+      if (e.key === "Enter") saveEdit();
+    }
+  }), /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    style: {
+      flex: "1 1 100%"
+    },
+    placeholder: "Positions they can play (RB, LB\u2026)",
+    value: editing.pos,
+    onChange: e => setEditing(Object.assign({}, editing, {
+      pos: e.target.value
+    }))
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "mini dark",
+    style: {
+      flex: 1,
+      padding: 10
+    },
+    onClick: saveEdit
+  }, "Save"), /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    style: {
+      flex: 1,
+      padding: 10
+    },
+    onClick: () => setEditing(null)
+  }, "Cancel")) : /*#__PURE__*/React.createElement("div", {
     className: "row",
     key: p.id
   }, /*#__PURE__*/React.createElement("div", {
@@ -1704,7 +1774,17 @@ function RosterTab({
     className: "eyebrow"
   }, p.pos || "no positions listed", " \xB7 ", statOf(p.id).snaps, " plays")), /*#__PURE__*/React.createElement("button", {
     className: "mini",
-    onClick: () => remove(p.id)
+    onClick: () => setEditing({
+      id: p.id,
+      num: p.num,
+      name: p.name,
+      pos: p.pos || ""
+    })
+  }, "Edit"), /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    onClick: () => {
+      if (window.confirm("Remove #" + p.num + " " + p.name + " from the roster? Season stats they already have stay saved, but re-adding them later counts as a new player. To change their number or name, use Edit instead.")) remove(p.id);
+    }
   }, "Remove"))), /*#__PURE__*/React.createElement("div", {
     className: "sechd"
   }, /*#__PURE__*/React.createElement("div", {

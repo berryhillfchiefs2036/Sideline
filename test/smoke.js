@@ -68,6 +68,19 @@ const type = (el, val) => {
   ok("bulk add created 5 players", $$(".row .plate").length >= 5);
   ok("roster count shows 5", $(".sechd .eyebrow").textContent.indexOf("5 players") >= 0);
 
+  console.log("\nedit a player");
+  const samRosterRow = $$(".row").find((r) => r.textContent.indexOf("Sam") >= 0);
+  click(Array.from(samRosterRow.querySelectorAll(".mini")).find((b) => b.textContent === "Edit"));
+  await flush();
+  const editNum = $$(".row input").find((i) => i.value === "7");
+  ok("edit opens with the current number", !!editNum);
+  type(editNum, "77");
+  click(byText(".mini", "Save"));
+  await flush();
+  const samRow2 = $$(".row").find((r) => r.textContent.indexOf("Sam") >= 0);
+  ok("number change saved on the same player", samRow2 && samRow2.querySelector(".plate").textContent === "77");
+  ok("roster still has 5 players", $(".sechd .eyebrow").textContent.indexOf("5 players") >= 0);
+
   console.log("\nlineups");
   click(byText(".nav button", "Lineups"));
   await flush();
