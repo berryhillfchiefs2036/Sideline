@@ -874,7 +874,8 @@ const type = (el, val) => {
   w2.eval(fs.readFileSync(path.join(root, "vendor/supabase.min.js"), "utf8"));
   w2.eval(fs.readFileSync(path.join(root, "app.js"), "utf8"));
   await flush();
-  ok("watch mode boots the gamecast", w2.document.body.textContent.indexOf("Watching ABCD") >= 0);
+  ok("watch mode boots the gamecast", w2.document.body.textContent.indexOf("Gamecast") >= 0);
+  ok("crew code hidden from fans", w2.document.body.textContent.indexOf("ABCD") < 0);
   ok("gamecast shows the scoreboard", !!w2.document.querySelector(".board"));
   ok("gamecast has no coaching controls",
     w2.document.querySelectorAll(".abtn").length === 0 &&
@@ -882,8 +883,8 @@ const type = (el, val) => {
     w2.document.querySelectorAll(".tick").length === 0);
   ok("gamecast draws the mock field", !!w2.document.querySelector(".gc-field") &&
     !!w2.document.querySelector(".gc-turf") && !!w2.document.querySelector(".gc-scale"));
-  ok("field scale runs between the end zones",
-    w2.document.querySelector(".gc-scale").textContent.indexOf("50") >= 0);
+  const gcNums = Array.from(w2.document.querySelectorAll(".gc-num")).map((e) => e.textContent);
+  ok("yard numbers run 10 to 50 and back", gcNums.join(",") === "10,20,30,40,50,40,30,20,10");
   ok("field meta shows down, ball spot, and drive",
     w2.document.body.textContent.indexOf("Ball on") >= 0 &&
     w2.document.body.textContent.indexOf("Drive") >= 0);

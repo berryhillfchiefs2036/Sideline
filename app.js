@@ -4924,7 +4924,7 @@ function GameCast({
       fontSize: 13,
       fontWeight: 600
     }
-  }, "Watching ", code), /*#__PURE__*/React.createElement("span", {
+  }, (((squad.teamName || "") + "").trim() || "Sideline") + (oppName !== "Them" ? " vs " + oppName : "")), /*#__PURE__*/React.createElement("span", {
     className: "eyebrow",
     style: {
       marginLeft: "auto"
@@ -4965,13 +4965,19 @@ function GameCast({
     className: "gc-ez"
   }), /*#__PURE__*/React.createElement("div", {
     className: "gc-turf"
-  }, [10, 20, 30, 40, 50, 60, 70, 80, 90].map(v => /*#__PURE__*/React.createElement("i", {
-    key: v,
+  }, [10, 20, 30, 40, 50, 60, 70, 80, 90].map(v => /*#__PURE__*/React.createElement(React.Fragment, {
+    key: v
+  }, /*#__PURE__*/React.createElement("i", {
     className: "gc-tick" + (v === 50 ? " mid" : ""),
     style: {
       left: v + "%"
     }
-  })), game.spot != null && toGain != null && toGain !== game.spot && /*#__PURE__*/React.createElement("span", {
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "gc-num",
+    style: {
+      left: v + "%"
+    }
+  }, v <= 50 ? v : 100 - v))), game.spot != null && toGain != null && toGain !== game.spot && /*#__PURE__*/React.createElement("span", {
     className: "gc-togo",
     style: {
       left: toGain + "%"
@@ -4985,7 +4991,7 @@ function GameCast({
     className: "gc-ez opp"
   })), /*#__PURE__*/React.createElement("div", {
     className: "gc-scale"
-  }, /*#__PURE__*/React.createElement("span", null, abbr(ourName)), /*#__PURE__*/React.createElement("span", null, "20"), /*#__PURE__*/React.createElement("span", null, "50"), /*#__PURE__*/React.createElement("span", null, "20"), /*#__PURE__*/React.createElement("span", null, abbr(oppName))), game.spot == null && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, abbr(ourName)), /*#__PURE__*/React.createElement("span", null, abbr(oppName))), game.spot == null && /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       textAlign: "center",

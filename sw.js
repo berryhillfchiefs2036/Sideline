@@ -1,5 +1,5 @@
 /* Sideline service worker — cache the app shell so it opens with no signal. */
-const CACHE = "sideline-v39";
+const CACHE = "sideline-v40";
 const SHELL = [
   "./", "./index.html", "./app.js", "./config.js", "./manifest.json",
   "./vendor/react.production.min.js",

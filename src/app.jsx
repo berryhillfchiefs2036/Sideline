@@ -2923,9 +2923,13 @@ function GameCast({ code }) {
   return (
     <div className="sl">
       <div className="sl-in">
+        {/* Never show the crew code here — it's the coaches' key to edit the
+            game, and fans only need to watch. */}
         <div className="crew" style={{ cursor: "default" }}>
           <span className={"dot " + (status === "live" ? "live" : "err")} />
-          <span style={{ fontSize: 13, fontWeight: 600 }}>Watching {code}</span>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>
+            {(((squad.teamName || "") + "").trim() || "Sideline")
+              + (oppName !== "Them" ? " vs " + oppName : "")}</span>
           <span className="eyebrow" style={{ marginLeft: "auto" }}>Gamecast · {statusText}</span>
         </div>
 
@@ -2960,7 +2964,10 @@ function GameCast({ code }) {
           <div className="gc-ez" />
           <div className="gc-turf">
             {[10, 20, 30, 40, 50, 60, 70, 80, 90].map((v) => (
-              <i key={v} className={"gc-tick" + (v === 50 ? " mid" : "")} style={{ left: v + "%" }} />
+              <React.Fragment key={v}>
+                <i className={"gc-tick" + (v === 50 ? " mid" : "")} style={{ left: v + "%" }} />
+                <span className="gc-num" style={{ left: v + "%" }}>{v <= 50 ? v : 100 - v}</span>
+              </React.Fragment>
             ))}
             {game.spot != null && toGain != null && toGain !== game.spot && (
               <span className="gc-togo" style={{ left: toGain + "%" }} />)}
@@ -2969,7 +2976,7 @@ function GameCast({ code }) {
           <div className="gc-ez opp" />
         </div>
         <div className="gc-scale">
-          <span>{abbr(ourName)}</span><span>20</span><span>50</span><span>20</span><span>{abbr(oppName)}</span>
+          <span>{abbr(ourName)}</span><span>{abbr(oppName)}</span>
         </div>
         {game.spot == null && (
           <div className="eyebrow" style={{ textAlign: "center", marginTop: 6 }}>
