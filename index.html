@@ -181,6 +181,24 @@ tr.short td { background:#F7EAE6; }
 .who { font-family:var(--cond); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--soft); margin-left:auto; flex:0 0 auto; }
 .boot { padding:60px 20px; text-align:center; font-family:'Saira Condensed',sans-serif; letter-spacing:.2em;
   text-transform:uppercase; color:#61705F; background:#DDE3D2; min-height:100vh; }
+/* Gamecast field graphic */
+.gc-meta { display:flex; gap:8px; margin-top:10px; }
+.gc-meta > div { flex:1; text-align:center; background:var(--card); border:1px solid var(--line);
+  border-radius:10px; padding:7px 4px 6px; }
+.gc-meta b { display:block; font-family:var(--cond); font-size:19px; font-weight:700; margin-top:1px; }
+.gc-field { display:flex; height:74px; margin-top:10px; border-radius:10px; overflow:hidden;
+  border:1px solid #4E6A4A; }
+.gc-ez { flex:0 0 11%; background:var(--go); }
+.gc-ez.opp { background:var(--plate); }
+.gc-turf { flex:1; position:relative; background:linear-gradient(90deg,#5C8A54,#69985F 50%,#5C8A54); }
+.gc-tick { position:absolute; top:0; bottom:0; width:1px; background:rgba(255,255,255,.35); }
+.gc-tick.mid { width:2px; background:rgba(255,255,255,.6); }
+.gc-togo { position:absolute; top:0; bottom:0; width:2px; background:var(--lamp); }
+.gc-ball { position:absolute; top:50%; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%;
+  background:#F3F1E6; border:3px solid #7A4A1E; box-shadow:0 1px 4px rgba(0,0,0,.45); }
+.gc-scale { display:flex; justify-content:space-between; margin-top:4px; padding:0 2px;
+  font-family:var(--cond); font-size:12px; font-weight:600; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--soft); }
 </style>
 </head>
 <body>

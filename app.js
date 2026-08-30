@@ -338,6 +338,7 @@ const freshSquad = () => ({
   minPlays: 8,
   schedule: [],
   scoring: "elementary",
+  teamName: "",
   rev: 0
 });
 const BASE = () => ({
@@ -406,6 +407,7 @@ function fold(ops) {
         down: g.down,
         distance: g.distance,
         quarter: g.quarter,
+        spot: g.spot,
         qMark: !!o.qMark
       }));
       if (g.spot != null) {
@@ -434,6 +436,7 @@ function fold(ops) {
       down: g.down,
       distance: g.distance,
       quarter: g.quarter,
+      spot: g.spot,
       qMark: !!o.qMark
     }));
     /* Drive gain from this play: offense logs our gain directly; defense logs
@@ -3813,7 +3816,30 @@ function RosterTab({
     value: "elementary"
   }, "Elementary \u2014 kick +2 \xB7 run/pass +1"), /*#__PURE__*/React.createElement("option", {
     value: "highschool"
-  }, "High school \u2014 kick +1 \xB7 run/pass +2"))));
+  }, "High school \u2014 kick +1 \xB7 run/pass +2"))), /*#__PURE__*/React.createElement("div", {
+    className: "sechd"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h2"
+  }, "Team name")), /*#__PURE__*/React.createElement("div", {
+    className: "row"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      fontSize: 14,
+      color: "var(--soft)"
+    }
+  }, "Shows on the fan gamecast \u2014 your team defends the left end zone."), /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    "aria-label": "Team name",
+    style: {
+      width: 150
+    },
+    placeholder: "Chiefs",
+    value: squad.teamName || "",
+    onChange: e => setSquad(s => Object.assign({}, s, {
+      teamName: e.target.value
+    }))
+  })));
 }
 
 /* ============================ LINEUPS ============================ */
@@ -4843,6 +4869,17 @@ function GameCast({
     return m;
   }, [squad]);
   const statusText = status === "noconfig" ? "needs setup" : status === "offline" ? "reconnecting…" : status === "connecting" ? "connecting…" : "live";
+
+  /* The mock field: our team drives left-to-right toward the far end zone.
+     The ball marker rides the optional spot tracker; the amber stripe is the
+     line to gain, worked out from the down & distance and who has the ball. */
+  const ourName = ((squad.teamName || "") + "").trim() || "Us";
+  const oppName = ((game.gameInfo && game.gameInfo.opponent || "") + "").trim() || "Them";
+  const abbr = s => (s.trim().split(/\s+/)[0] || s).slice(0, 4).toUpperCase();
+  const drives = computeDrives(game.plays);
+  const lastDrive = drives.length ? drives[drives.length - 1] : null;
+  const curDrive = lastDrive && lastDrive.result === "On the field" ? lastDrive : null;
+  const toGain = game.spot != null ? clampSpot(game.unit === "defense" ? game.spot - game.distance : game.spot + game.distance) : null;
   return /*#__PURE__*/React.createElement("div", {
     className: "sl"
   }, /*#__PURE__*/React.createElement("div", {
@@ -4872,7 +4909,7 @@ function GameCast({
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, "Us"), /*#__PURE__*/React.createElement("div", {
+  }, abbr(ourName)), /*#__PURE__*/React.createElement("div", {
     className: "score-num"
   }, game.us)), /*#__PURE__*/React.createElement("div", {
     className: "dd"
@@ -4880,13 +4917,53 @@ function GameCast({
     className: "dd-main"
   }, ORD[game.down], " ", /*#__PURE__*/React.createElement("small", null, "&"), " ", game.distance), /*#__PURE__*/React.createElement("div", {
     className: "dd-sub"
-  }, "Quarter ", game.quarter, " \xB7 ", game.playCount, " plays run", game.spot != null ? " · ball on " + spotLabel(game.spot) : "")), /*#__PURE__*/React.createElement("div", {
+  }, "Quarter ", game.quarter, " \xB7 ", game.playCount, " plays run")), /*#__PURE__*/React.createElement("div", {
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, "Them"), /*#__PURE__*/React.createElement("div", {
+  }, abbr(oppName)), /*#__PURE__*/React.createElement("div", {
     className: "score-num"
-  }, game.them)))), game.gameInfo && game.gameInfo.opponent && /*#__PURE__*/React.createElement("div", {
+  }, game.them)))), /*#__PURE__*/React.createElement("div", {
+    className: "gc-meta"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "eyebrow"
+  }, "Down"), /*#__PURE__*/React.createElement("b", null, ORD[game.down], " & ", game.distance)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "eyebrow"
+  }, "Ball on"), /*#__PURE__*/React.createElement("b", null, game.spot != null ? spotLabel(game.spot) : "—")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "eyebrow"
+  }, "Drive"), /*#__PURE__*/React.createElement("b", null, curDrive ? curDrive.plays + (curDrive.plays === 1 ? " play, " : " plays, ") + curDrive.yards + " yds" : "—"))), /*#__PURE__*/React.createElement("div", {
+    className: "gc-field"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "gc-ez"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "gc-turf"
+  }, [10, 20, 30, 40, 50, 60, 70, 80, 90].map(v => /*#__PURE__*/React.createElement("i", {
+    key: v,
+    className: "gc-tick" + (v === 50 ? " mid" : ""),
+    style: {
+      left: v + "%"
+    }
+  })), game.spot != null && toGain != null && toGain !== game.spot && /*#__PURE__*/React.createElement("span", {
+    className: "gc-togo",
+    style: {
+      left: toGain + "%"
+    }
+  }), game.spot != null && /*#__PURE__*/React.createElement("span", {
+    className: "gc-ball",
+    style: {
+      left: game.spot + "%"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "gc-ez opp"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "gc-scale"
+  }, /*#__PURE__*/React.createElement("span", null, abbr(ourName)), /*#__PURE__*/React.createElement("span", null, "20"), /*#__PURE__*/React.createElement("span", null, "50"), /*#__PURE__*/React.createElement("span", null, "20"), /*#__PURE__*/React.createElement("span", null, abbr(oppName))), game.spot == null && /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      textAlign: "center",
+      marginTop: 6
+    }
+  }, "The ball appears on the field when the coaches track the spot"), game.gameInfo && game.gameInfo.opponent && /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       textAlign: "center",
@@ -4930,8 +5007,11 @@ function GameCast({
     }, "Quarter ", p.quarter), /*#__PURE__*/React.createElement("div", {
       className: "logline"
     }, /*#__PURE__*/React.createElement("span", {
-      className: "eyebrow"
-    }, ORD[p.down], " & ", p.distance), body));
+      className: "eyebrow",
+      style: {
+        flex: "0 0 auto"
+      }
+    }, ORD[p.down], " & ", p.distance, p.spot != null ? " · " + spotLabel(p.spot) : ""), body));
   })), /*#__PURE__*/React.createElement("div", {
     className: "empty-note",
     style: {

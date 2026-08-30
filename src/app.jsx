@@ -121,7 +121,8 @@ const freshLineups = () => ({
   defense: mkSlots(DEFENSE_SLOTS),
   special: ST_KEYS.reduce((a, k) => Object.assign({}, a, { [k]: mkSlots(SPECIAL_TEAMS[k].slots) }), {}),
 });
-const freshSquad = () => ({ roster: [], lineups: freshLineups(), minPlays: 8, schedule: [], scoring: "elementary", rev: 0 });
+const freshSquad = () => ({ roster: [], lineups: freshLineups(), minPlays: 8, schedule: [],
+  scoring: "elementary", teamName: "", rev: 0 });
 const BASE = () => ({ quarter: 1, us: 0, them: 0, down: 1, distance: 10, unit: "offense",
   stKey: "kickoff", spot: null, swaps: {}, plays: [] });
 
@@ -167,7 +168,8 @@ function fold(ops) {
          (replay the down); against the defense moves the chains, with an
          automatic first down when the yardage covers the distance. Manual
          down/distance taps still override, as always. */
-      g.plays.push(Object.assign({}, o, { down: g.down, distance: g.distance, quarter: g.quarter, qMark: !!o.qMark }));
+      g.plays.push(Object.assign({}, o,
+        { down: g.down, distance: g.distance, quarter: g.quarter, spot: g.spot, qMark: !!o.qMark }));
       if (g.spot != null) {
         /* Move the mark with the walk-off, relative to which way the drive
            is going (defense unit = the other team is driving at our goal).
@@ -188,7 +190,8 @@ function fold(ops) {
 
     const sc = SCORES.find((x) => x.key === o.score);
     const pts = o.pts != null ? o.pts : sc ? sc.pts : 0;
-    g.plays.push(Object.assign({}, o, { down: g.down, distance: g.distance, quarter: g.quarter, qMark: !!o.qMark }));
+    g.plays.push(Object.assign({}, o,
+      { down: g.down, distance: g.distance, quarter: g.quarter, spot: g.spot, qMark: !!o.qMark }));
     /* Drive gain from this play: offense logs our gain directly; defense logs
        the OTHER team's gain (sack/TFL yards are entered as yards lost, so
        they count negative); special teams move the ball by the kick/return. */
@@ -2219,6 +2222,16 @@ function RosterTab({ squad, setSquad, statOf }) {
           <option value="highschool">High school — kick +1 · run/pass +2</option>
         </select>
       </div>
+
+      <div className="sechd"><div className="h2">Team name</div></div>
+      <div className="row">
+        <div style={{ flex: 1, fontSize: 14, color: "var(--soft)" }}>
+          Shows on the fan gamecast — your team defends the left end zone.
+        </div>
+        <input className="inp" aria-label="Team name" style={{ width: 150 }} placeholder="Chiefs"
+          value={squad.teamName || ""}
+          onChange={(e) => setSquad((s) => Object.assign({}, s, { teamName: e.target.value }))} />
+      </div>
     </React.Fragment>
   );
 }
@@ -2884,6 +2897,19 @@ function GameCast({ code }) {
     : status === "offline" ? "reconnecting…"
     : status === "connecting" ? "connecting…" : "live";
 
+  /* The mock field: our team drives left-to-right toward the far end zone.
+     The ball marker rides the optional spot tracker; the amber stripe is the
+     line to gain, worked out from the down & distance and who has the ball. */
+  const ourName = ((squad.teamName || "") + "").trim() || "Us";
+  const oppName = (((game.gameInfo && game.gameInfo.opponent) || "") + "").trim() || "Them";
+  const abbr = (s) => (s.trim().split(/\s+/)[0] || s).slice(0, 4).toUpperCase();
+  const drives = computeDrives(game.plays);
+  const lastDrive = drives.length ? drives[drives.length - 1] : null;
+  const curDrive = lastDrive && lastDrive.result === "On the field" ? lastDrive : null;
+  const toGain = game.spot != null
+    ? clampSpot(game.unit === "defense" ? game.spot - game.distance : game.spot + game.distance)
+    : null;
+
   return (
     <div className="sl">
       <div className="sl-in">
@@ -2896,20 +2922,50 @@ function GameCast({ code }) {
         <div className="board">
           <div className="board-top">
             <div className="score-blk">
-              <div className="eyebrow">Us</div>
+              <div className="eyebrow">{abbr(ourName)}</div>
               <div className="score-num">{game.us}</div>
             </div>
             <div className="dd">
               <div className="dd-main">{ORD[game.down]} <small>&amp;</small> {game.distance}</div>
-              <div className="dd-sub">Quarter {game.quarter} · {game.playCount} plays run
-                {game.spot != null ? " · ball on " + spotLabel(game.spot) : ""}</div>
+              <div className="dd-sub">Quarter {game.quarter} · {game.playCount} plays run</div>
             </div>
             <div className="score-blk">
-              <div className="eyebrow">Them</div>
+              <div className="eyebrow">{abbr(oppName)}</div>
               <div className="score-num">{game.them}</div>
             </div>
           </div>
         </div>
+
+        <div className="gc-meta">
+          <div><span className="eyebrow">Down</span>
+            <b>{ORD[game.down]} &amp; {game.distance}</b></div>
+          <div><span className="eyebrow">Ball on</span>
+            <b>{game.spot != null ? spotLabel(game.spot) : "—"}</b></div>
+          <div><span className="eyebrow">Drive</span>
+            <b>{curDrive
+              ? curDrive.plays + (curDrive.plays === 1 ? " play, " : " plays, ") + curDrive.yards + " yds"
+              : "—"}</b></div>
+        </div>
+        <div className="gc-field">
+          <div className="gc-ez" />
+          <div className="gc-turf">
+            {[10, 20, 30, 40, 50, 60, 70, 80, 90].map((v) => (
+              <i key={v} className={"gc-tick" + (v === 50 ? " mid" : "")} style={{ left: v + "%" }} />
+            ))}
+            {game.spot != null && toGain != null && toGain !== game.spot && (
+              <span className="gc-togo" style={{ left: toGain + "%" }} />)}
+            {game.spot != null && <span className="gc-ball" style={{ left: game.spot + "%" }} />}
+          </div>
+          <div className="gc-ez opp" />
+        </div>
+        <div className="gc-scale">
+          <span>{abbr(ourName)}</span><span>20</span><span>50</span><span>20</span><span>{abbr(oppName)}</span>
+        </div>
+        {game.spot == null && (
+          <div className="eyebrow" style={{ textAlign: "center", marginTop: 6 }}>
+            The ball appears on the field when the coaches track the spot
+          </div>
+        )}
 
         {game.gameInfo && game.gameInfo.opponent && (
           <div className="eyebrow" style={{ textAlign: "center", marginTop: 8 }}>
@@ -2956,7 +3012,8 @@ function GameCast({ code }) {
               <React.Fragment key={p.id || i}>
                 {qBreak && <div className="eyebrow" style={{ margin: "10px 0 4px" }}>Quarter {p.quarter}</div>}
                 <div className="logline">
-                  <span className="eyebrow">{ORD[p.down]} &amp; {p.distance}</span>
+                  <span className="eyebrow" style={{ flex: "0 0 auto" }}>
+                    {ORD[p.down]} &amp; {p.distance}{p.spot != null ? " · " + spotLabel(p.spot) : ""}</span>
                   {body}
                 </div>
               </React.Fragment>

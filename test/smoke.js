@@ -81,6 +81,13 @@ const type = (el, val) => {
   ok("number change saved on the same player", samRow2 && samRow2.querySelector(".plate").textContent === "77");
   ok("roster still has 5 players", $(".sechd .eyebrow").textContent.indexOf("5 players") >= 0);
 
+  console.log("\nteam name");
+  const tnInp = $$("input").find((i) => i.getAttribute("aria-label") === "Team name");
+  ok("team name setting offered", !!tnInp);
+  type(tnInp, "Berryhill Chiefs");
+  await flush();
+  ok("team name saved", JSON.parse(store["sideline.solo.squad"]).teamName === "Berryhill Chiefs");
+
   console.log("\nlineups");
   click(byText(".nav button", "Lineups"));
   await flush();
@@ -867,6 +874,14 @@ const type = (el, val) => {
     w2.document.querySelectorAll(".abtn").length === 0 &&
     w2.document.querySelectorAll(".nav").length === 0 &&
     w2.document.querySelectorAll(".tick").length === 0);
+  ok("gamecast draws the mock field", !!w2.document.querySelector(".gc-field") &&
+    !!w2.document.querySelector(".gc-turf") && !!w2.document.querySelector(".gc-scale"));
+  ok("field scale runs between the end zones",
+    w2.document.querySelector(".gc-scale").textContent.indexOf("50") >= 0);
+  ok("field meta shows down, ball spot, and drive",
+    w2.document.body.textContent.indexOf("Ball on") >= 0 &&
+    w2.document.body.textContent.indexOf("Drive") >= 0);
+  ok("no ball marker until the coaches track the spot", !w2.document.querySelector(".gc-ball"));
 
   console.log("\nreopen an ended game");
   const playsBeforeEnd = $(".dd-sub").textContent;
