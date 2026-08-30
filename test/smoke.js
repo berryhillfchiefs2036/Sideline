@@ -887,6 +887,199 @@ const type = (el, val) => {
   click(byText(".nav button", "Game"));
   await flush();
 
+  console.log("\npicked off and the turnover margin");
+  click(byText(".unit", "Offense"));
+  await flush();
+  click($$(".pcard").find((c) => c.textContent.indexOf("Eli") >= 0).querySelector(".pc-top"));
+  await flush();
+  ok("picked off is an option", !!byText(".opt", "Picked off"));
+  click(byText(".opt", "Picked off"));
+  await flush();
+  const poPasser = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Who threw it");
+  ok("pick asks who threw it, defaulting to the QB",
+    !!poPasser && poPasser.options[poPasser.selectedIndex].textContent.indexOf("Jordan") >= 0);
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  click(byText(".nav button", "Stats"));
+  await flush();
+  ok("situational tiles shown", $$(".eyebrow").some((e) => e.textContent === "1st downs") &&
+    $$(".eyebrow").some((e) => e.textContent === "3rd down"));
+  ok("giveaway counted against the margin", $$(".score-num")[8].textContent === "-1");
+  click(byText(".nav button", "Game"));
+  await flush();
+  click(byText(".unit", "Defense"));
+  await flush();
+  click($$(".pcard").find((c) => c.textContent.indexOf("Ray") >= 0).querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "Interception"));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  click(byText(".nav button", "Stats"));
+  await flush();
+  ok("takeaway evens the margin at 0", $$(".score-num")[8].textContent === "0");
+  const fd0 = parseInt($$(".score-num")[6].textContent, 10);
+  const third0 = $$(".score-num")[7].textContent.split("/").map(Number);
+
+  console.log("\nfirst downs and third down");
+  click(byText(".nav button", "Game"));
+  await flush();
+  click(byText(".unit", "Offense"));
+  await flush();
+  click($$(".pcard").find((c) => c.textContent.indexOf("Eli") >= 0).querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "Ran it"));
+  await flush();
+  const fdYds = $(".yardbox select");
+  sSetter.call(fdYds, "12");
+  fdYds.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  click(byText(".nav button", "Stats"));
+  await flush();
+  ok("a 12-yard run adds a first down", parseInt($$(".score-num")[6].textContent, 10) === fd0 + 1);
+  const third1 = $$(".score-num")[7].textContent.split("/").map(Number);
+  ok("third-down count untouched by a 1st-down play", third1[1] === third0[1] && third1[0] === third0[0]);
+  click(byText(".nav button", "Game"));
+  await flush();
+  click(byText(".chip", "3rd"));
+  await flush();
+  click($$(".pcard").find((c) => c.textContent.indexOf("Eli") >= 0).querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "Ran it"));
+  await flush();
+  const shortYds = $(".yardbox select");
+  sSetter.call(shortYds, "2");
+  shortYds.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  click(byText(".nav button", "Stats"));
+  await flush();
+  const third2 = $$(".score-num")[7].textContent.split("/").map(Number);
+  ok("a short 3rd down counts the attempt, not the conversion",
+    third2[1] === third1[1] + 1 && third2[0] === third1[0]);
+
+  console.log("\ndrives");
+  click(byText(".stbar button", "Drives"));
+  await flush();
+  ok("drives view lists possessions", $$("tbody tr").length >= 2);
+  ok("the pick shows as a drive result", $$("tbody tr").some((r) => r.textContent.indexOf("Picked off") >= 0));
+  ok("the current possession is on the field",
+    $$("tbody tr").some((r) => r.textContent.indexOf("On the field") >= 0));
+
+  console.log("\nbox score");
+  let boxText = "";
+  w.prompt = (msg, val) => { boxText = String(val != null ? val : msg); return null; };
+  click(byText(".abtn", "Share box score"));
+  await flush();
+  ok("box score generated with the final line", boxText.indexOf("FINAL") === 0);
+  ok("box score carries situational team stats",
+    boxText.indexOf("First downs") >= 0 && boxText.indexOf("Turnovers") >= 0);
+  ok("box score names the leaders", boxText.indexOf("Leaders") >= 0 && boxText.indexOf("Rushing:") >= 0);
+  w.prompt = () => "Eagles";
+
+  console.log("\nkickoff details");
+  click(byText(".nav button", "Game"));
+  await flush();
+  click(byText(".unit", "Special"));
+  await flush();
+  click(byText(".stbar button", "Kickoff"));
+  await flush();
+  click($$(".pcard").find((c) => c.textContent.indexOf("Jordan") >= 0).querySelector(".pc-top"));
+  await flush();
+  ok("touchback and onside options offered",
+    !!byText(".opt", "Touchback") && !!byText(".opt", "Onside — we got it"));
+  click(byText(".opt", "Touchback"));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  ok("touchback in the play log", !!byText(".logline", "touchback"));
+  click($$(".pcard").find((c) => c.textContent.indexOf("Jordan") >= 0).querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "Onside — we got it"));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  ok("onside kick in the play log", !!byText(".logline", "onside"));
+  click(byText(".nav button", "Stats"));
+  await flush();
+  boxText = "";
+  w.prompt = (msg, val) => { boxText = String(val != null ? val : msg); return null; };
+  click(byText(".abtn", "Share box score"));
+  await flush();
+  ok("kickoff details reach the box score",
+    boxText.indexOf("touchback") >= 0 && boxText.indexOf("onside 1/1") >= 0);
+  w.prompt = () => "Eagles";
+
+  console.log("\nscrimmage mode");
+  click(byText(".nav button", "Game"));
+  await flush();
+  click(byText(".abtn", "End game"));
+  await flush();
+  ok("board cleared before the scrimmage", $(".dd-sub").textContent.indexOf("0 plays") >= 0);
+  click(byText(".nav button", "Season"));
+  await flush();
+  ok("record counts the real games", $(".dd-main").textContent === "1–1–1");
+  type($(".sched-date"), "2026-10-01");
+  type($(".sched-opp"), "Practice Squad");
+  click($$("input[type=checkbox]").find((c) => c.getAttribute("aria-label") === "Scrimmage"));
+  await flush();
+  click(byText(".mini", "Add to schedule"));
+  await flush();
+  const scrimRow = byText(".row", "Practice Squad");
+  ok("scrimmage flagged on the schedule", !!scrimRow && scrimRow.textContent.indexOf("scrimmage") >= 0);
+  click(Array.from(scrimRow.querySelectorAll(".mini")).find((b) => b.textContent === "Add stats"));
+  await flush();
+  ok("board tagged as a scrimmage",
+    $(".sl").textContent.indexOf("Tracking vs Practice Squad") >= 0 &&
+    $(".sl").textContent.indexOf("· scrimmage") >= 0);
+  click(byText(".unit", "Offense"));
+  await flush();
+  click($$(".pcard").find((c) => c.textContent.indexOf("Jordan") >= 0).querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "Ran it"));
+  click(byText(".opt", "Touchdown"));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  ok("scrimmage touchdown on the board", $$(".score-num")[0].textContent === "6");
+  click(byText(".abtn", "End game"));
+  await flush();
+  click(byText(".nav button", "Season"));
+  await flush();
+  ok("scrimmage stays out of the record", $(".dd-main").textContent === "1–1–1");
+  ok("scrimmage game listed and tagged", $$(".row").some((r) => r.querySelector(".plate") &&
+    r.querySelector(".plate").textContent === "6–0" && r.textContent.indexOf("scrimmage") >= 0));
+
+  console.log("\nseason totals include the live game");
+  const nicoTot0 = $$("tbody tr").find((r) => r.textContent.indexOf("Nico") >= 0);
+  const nicoBase = nicoTot0 ? parseInt(nicoTot0.querySelectorAll("td")[5].textContent, 10) : 0;
+  ok("no live-game note on an empty board",
+    !$$(".eyebrow").some((e) => e.textContent.indexOf("include the game on the board") >= 0));
+  click(byText(".nav button", "Game"));
+  await flush();
+  click($$(".pcard.empty")[0].querySelector(".pc-top"));
+  await flush();
+  click($$(".sheet .row").find((r) => r.textContent.indexOf("Nico") >= 0));
+  await flush();
+  click($$(".pcard").find((c) => c.textContent.indexOf("Nico") >= 0).querySelector(".pc-top"));
+  await flush();
+  click(byText(".opt", "Ran it"));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  click(byText(".nav button", "Season"));
+  await flush();
+  ok("live-game note shown",
+    $$(".eyebrow").some((e) => e.textContent.indexOf("include the game on the board") >= 0));
+  const nicoTot1 = $$("tbody tr").find((r) => r.textContent.indexOf("Nico") >= 0);
+  ok("live snaps flow into season totals",
+    !!nicoTot1 && parseInt(nicoTot1.querySelectorAll("td")[5].textContent, 10) === nicoBase + 1);
+  click(byText(".nav button", "Game"));
+  await flush();
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

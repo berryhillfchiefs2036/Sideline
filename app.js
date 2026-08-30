@@ -49,6 +49,10 @@ const OFF_ACTIONS = [{
   label: "Incomplete pass",
   hint: "no catch"
 }, {
+  key: "pickedoff",
+  label: "Picked off",
+  hint: "interception thrown"
+}, {
   key: "conv",
   label: "Conversion good",
   hint: "pick the points below"
@@ -122,6 +126,18 @@ const ST_ACTIONS = [{
   key: "fumrec",
   label: "Recovered",
   hint: "loose ball"
+}, {
+  key: "touchback",
+  label: "Touchback",
+  hint: "kick, no return"
+}, {
+  key: "onsidewon",
+  label: "Onside — we got it!",
+  hint: "recovered"
+}, {
+  key: "onsidelost",
+  label: "Onside — they got it",
+  hint: "not recovered"
 }];
 const PENALTIES = [{
   key: "falsestart",
@@ -296,7 +312,11 @@ const VERB = {
   fumble: "fumble, lost",
   fumkept: "fumble, kept it",
   team: "team play",
-  kick: "kicked"
+  kick: "kicked",
+  pickedoff: "pass picked off",
+  touchback: "kickoff — touchback",
+  onsidewon: "onside kick — we got it!",
+  onsidelost: "onside kick — they got it"
 };
 const uid = () => Math.random().toString(36).slice(2, 9);
 const mkSlots = labels => labels.map(l => ({
@@ -438,7 +458,7 @@ function fold(ops) {
     } else if ((o.unit === "offense" || o.unit === "defense") && o.action !== "stopconv" && o.action !== "block" && o.action !== "conv" && o.action !== "convfail") {
       /* Conversion tries (ours or theirs, made or failed) sit outside the
          drive — there's no down to advance. */
-      const turnover = o.action === "int" || o.action === "fumrec" || o.action === "fumble";
+      const turnover = o.action === "int" || o.action === "fumrec" || o.action === "fumble" || o.action === "pickedoff";
       if (turnover) {
         g.down = 1;
         g.distance = 10;
@@ -489,9 +509,11 @@ const blank = () => ({
   sack: 0,
   lossY: 0,
   int: 0,
+  intT: 0,
   fr: 0,
   pbu: 0,
   blk: 0,
+  tb: 0,
   pen: 0,
   penY: 0,
   td: 0,
@@ -514,15 +536,22 @@ function tally(plays) {
       s.snaps++;
       if (p.unit === "offense") s.off++;else if (p.unit === "defense") s.def++;else s.st++;
     });
-    /* A caught or incomplete pass also credits the passer (QB by default,
-       or whoever the coach picked for a trick play). */
-    if (p.passerId && (p.action === "catch" || p.action === "incomplete")) {
+    /* A caught, incomplete, or picked-off pass also credits the passer (QB
+       by default, or whoever the coach picked for a trick play). */
+    if (p.passerId && (p.action === "catch" || p.action === "incomplete" || p.action === "pickedoff")) {
       const q = g(p.passerId);
       q.att++;
       if (p.action === "catch") {
         q.cmp++;
         q.passY += p.yards || 0;
       }
+      if (p.action === "pickedoff") q.intT++;
+    }
+    /* A pick logged straight on the QB's own card (no separate passer). */
+    if (p.action === "pickedoff" && !p.passerId && p.playerId) {
+      const q = g(p.playerId);
+      q.att++;
+      q.intT++;
     }
     /* Teammates in on the same tackle get their assists on this play. */
     (p.assistIds || []).forEach(id => {
@@ -552,6 +581,11 @@ function tally(plays) {
       s.kicks++;
       s.kickY += y;
     }
+    if (p.action === "touchback") {
+      s.kicks++;
+      s.tb++;
+    }
+    if (p.action === "onsidewon" || p.action === "onsidelost") s.kicks++;
     /* Explicit attempt actions cover missed tries; made tries logged as any
        other action still count as attempts via their score below. */
     if (p.action === "fga") s.fga++;
@@ -616,6 +650,205 @@ function seasonTotals(games) {
     });
   });
   return Object.keys(m).map(k => m[k]);
+}
+
+/* Team-level situational numbers, all derived from data every play already
+   carries (each play stores the down and distance it was snapped at, so
+   first downs and 3rd/4th-down conversions cost the coaches zero extra taps). */
+function teamTotals(plays) {
+  const T = {
+    rush: 0,
+    pass: 0,
+    kr: 0,
+    pr: 0,
+    allowed: 0,
+    fd: 0,
+    thirdA: 0,
+    thirdC: 0,
+    fourthA: 0,
+    fourthC: 0,
+    takeaways: 0,
+    giveaways: 0,
+    tb: 0,
+    onA: 0,
+    onR: 0,
+    penN: 0,
+    penY: 0
+  };
+  plays.forEach(p => {
+    if (p.type === "pen") {
+      if (p.ours) {
+        T.penN++;
+        T.penY += p.yards || 0;
+      }
+      /* A defensive penalty that covers the distance moves our chains. */
+      if (p.side === "defense" && p.unit !== "defense" && (p.yards || 0) >= (p.distance || 0)) T.fd++;
+      return;
+    }
+    const y = p.yards || 0;
+    if (p.unit === "defense" && !(p.them && p.action === "punt")) T.allowed += p.action === "sack" || p.action === "tfl" ? -y : y;
+    if (p.unit === "defense" && !p.them && (p.action === "int" || p.action === "fumrec")) T.takeaways++;
+    if (p.them) return;
+    if (p.unit === "offense") {
+      if (p.action === "rush") T.rush += y;
+      if (p.action === "catch" || p.action === "pass") T.pass += y;
+      if (p.action === "fumble" || p.action === "pickedoff") T.giveaways++;
+      const isConv = p.action === "conv" || p.action === "convfail" || p.action === "stopconv" || p.action === "block" || p.score === "pat" || p.score === "two";
+      if (!isConv) {
+        const moved = y >= (p.distance || 10) || p.score === "td";
+        if (moved) T.fd++;
+        if (p.down === 3) {
+          T.thirdA++;
+          if (moved) T.thirdC++;
+        }
+        if (p.down === 4) {
+          T.fourthA++;
+          if (moved) T.fourthC++;
+        }
+      }
+    }
+    if (p.unit === "special") {
+      if (p.action === "return") {
+        if (p.stKey === "kickReturn" || p.stKey === "kickoff") T.kr += y;
+        if (p.stKey === "puntReturn" || p.stKey === "punt") T.pr += y;
+      }
+      if (p.action === "touchback") T.tb++;
+      if (p.action === "onsidewon") {
+        T.onA++;
+        T.onR++;
+      }
+      if (p.action === "onsidelost") T.onA++;
+    }
+  });
+  return T;
+}
+
+/* Group the game into offensive possessions. Best-effort from the log: a
+   drive opens with our first offensive play and closes on a score, a lost
+   ball, a failed 4th down, or when the ball clearly changes hands. */
+function computeDrives(plays) {
+  const drives = [];
+  let cur = null;
+  const close = result => {
+    if (!cur) return;
+    if (result && !cur.result) cur.result = result;
+    drives.push(cur);
+    cur = null;
+  };
+  plays.forEach(p => {
+    if (p.type === "pen") {
+      if (cur) cur.yards += (p.side === "defense" ? 1 : -1) * (p.yards || 0);
+      return;
+    }
+    if (p.them || p.unit === "defense") {
+      close("");
+      return;
+    }
+    if (p.unit === "special") {
+      if (!cur) return;
+      if (p.stKey === "punt") close("Punt");else if (p.stKey === "fieldGoal") close(p.score === "fg" ? "Field goal" : "FG missed");else close("");
+      return;
+    }
+    if (p.unit !== "offense") return;
+    /* Post-TD conversion tries sit outside the drive. */
+    if (p.action === "conv" || p.action === "convfail" || p.action === "stopconv" || p.action === "block" || p.score === "pat" || p.score === "two") return;
+    if (!cur) cur = {
+      q: p.quarter,
+      plays: 0,
+      yards: 0,
+      result: ""
+    };
+    cur.plays++;
+    const y = p.yards || 0;
+    if (["rush", "catch", "pass", "fumkept"].indexOf(p.action) >= 0) cur.yards += y;
+    if (p.score === "td") {
+      close("Touchdown");
+      return;
+    }
+    if (p.score === "fg") {
+      close("Field goal");
+      return;
+    }
+    if (p.action === "fumble") {
+      close("Fumble lost");
+      return;
+    }
+    if (p.action === "pickedoff") {
+      close("Picked off");
+      return;
+    }
+    if (p.down >= 4 && y < (p.distance || 10)) {
+      close("Turnover on downs");
+      return;
+    }
+  });
+  if (cur) {
+    cur.result = "On the field";
+    drives.push(cur);
+  }
+  return drives;
+}
+
+/* A text box score fit for the team group chat, built from an archived game
+   record (or the game on the board shaped like one). */
+function boxScoreText(rec) {
+  const T = teamTotals(rec.plays || []);
+  const names = {};
+  (rec.players || []).forEach(r => {
+    names[r.id] = "#" + r.num + " " + r.name;
+  });
+  const who = id => names[id] || "Team";
+  const res = rec.us > rec.them ? "W" : rec.us < rec.them ? "L" : "T";
+  const L = [];
+  L.push("FINAL" + (rec.scrim ? " (scrimmage)" : "") + ": Us " + rec.us + " — " + (rec.opponent || "Them") + " " + rec.them + " (" + res + ")");
+  if (rec.endedAt) L.push(new Date(rec.endedAt).toLocaleDateString());
+  L.push("");
+  L.push("Team");
+  L.push("Rushing " + T.rush + " · Passing " + T.pass + " · Total " + (T.rush + T.pass) + " · Allowed " + T.allowed);
+  L.push("First downs " + T.fd + " · 3rd down " + T.thirdC + "/" + T.thirdA + " · 4th down " + T.fourthC + "/" + T.fourthA);
+  const m = T.takeaways - T.giveaways;
+  L.push("Turnovers " + (m > 0 ? "+" : "") + m + " (" + T.takeaways + " taken / " + T.giveaways + " lost)");
+  if (T.penN) L.push("Penalties " + T.penN + " for " + T.penY + " yds");
+  if (T.tb || T.onA) L.push("Kickoffs: " + T.tb + " touchback" + (T.tb === 1 ? "" : "s") + " · onside " + T.onR + "/" + T.onA);
+  const scoring = (rec.plays || []).filter(p => p.type !== "pen" && (p.pts > 0 || p.score && p.score !== "none" && p.pts == null));
+  if (scoring.length) {
+    L.push("");
+    L.push("Scoring");
+    scoring.forEach(p => {
+      const sc = SCORES.find(x => x.key === p.score);
+      const pts = p.pts != null ? p.pts : sc ? sc.pts : 0;
+      const ours = !p.them && (p.unit !== "defense" || p.score === "td" || p.score === "safety");
+      const desc = p.them ? "Their " + (sc ? sc.label.toLowerCase() : "score") + (p.yards ? ", " + p.yards + " yd" : "") : who(p.playerId) + (VERB[p.action] ? " " + VERB[p.action] : "") + (p.yards ? " " + p.yards + " yd" : "") + (sc ? " — " + sc.label : "");
+      L.push("Q" + p.quarter + "  " + desc + "  (+" + pts + (ours ? " us" : " them") + ")");
+    });
+  }
+  const P = rec.players || [];
+  const top = (key, fmt) => {
+    const best = P.slice().sort((a, b) => (b.s && b.s[key] || 0) - (a.s && a.s[key] || 0))[0];
+    return best && best.s && best.s[key] > 0 ? fmt(best) : null;
+  };
+  const leaders = [top("rushY", r => "Rushing: " + who(r.id) + " — " + r.s.rush + " for " + r.s.rushY), top("recY", r => "Receiving: " + who(r.id) + " — " + r.s.rec + " for " + r.s.recY), top("passY", r => "Passing: " + who(r.id) + " — " + r.s.cmp + "/" + r.s.att + ", " + r.s.passY + " yds"), top("tk", r => "Tackles: " + who(r.id) + " — " + r.s.tk + (r.s.ast ? " (+" + r.s.ast + " ast)" : ""))].filter(Boolean);
+  if (leaders.length) {
+    L.push("");
+    L.push("Leaders");
+    leaders.forEach(x => L.push(x));
+  }
+  return L.join("\n");
+}
+
+/* Hand text to the phone's share sheet, else the clipboard, else a prompt. */
+function shareText(text) {
+  if (navigator.share) {
+    navigator.share({
+      text
+    }).catch(() => {});
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => window.alert("Box score copied — paste it anywhere:\n\n" + text), () => window.prompt("Copy the box score:", text));
+    return;
+  }
+  window.prompt("Copy the box score:", text);
 }
 const download = (name, text, mime) => {
   const a = document.createElement("a");
@@ -1136,7 +1369,8 @@ function Sideline() {
       them: game.them,
       playsCount: game.playCount,
       plays: game.plays,
-      players
+      players,
+      scrim: !!(game.gameInfo || {}).scrim
     });
     /* If this board was tracking a scheduled game, stamp that schedule entry
        as completed with the final score. */
@@ -1176,7 +1410,8 @@ function Sideline() {
       value: {
         schedId: g.id,
         opponent: g.opponent,
-        date: g.date
+        date: g.date,
+        scrim: !!g.scrim
       }
     });
     setTab("game");
@@ -1233,6 +1468,20 @@ function Sideline() {
     S.removeGame(rec.id);
     setTab("game");
   };
+
+  /* The game on the board, shaped like an archived record so season totals
+     and the box score can include it before it's ended. */
+  const liveRec = game.playCount > 0 ? {
+    id: "live",
+    endedAt: new Date().toISOString(),
+    scrim: !!(game.gameInfo || {}).scrim,
+    players: roster.map(p => ({
+      id: p.id,
+      num: p.num,
+      name: p.name,
+      s: statOf(p.id)
+    })).filter(r => r.s.snaps > 0)
+  } : null;
   const lastUndoable = game.live.slice().reverse().find(o => ["play", "pen", "sub", "adj", "set"].indexOf(o.type) >= 0);
   const undo = () => {
     if (!lastUndoable) return;
@@ -1310,7 +1559,8 @@ function Sideline() {
     onImport: S.importGames,
     onTrack: trackScheduled,
     reopenableId: reopenableId,
-    onReopen: reopenGame
+    onReopen: reopenGame,
+    live: liveRec
   })), sheet && sheet.type === "play" && /*#__PURE__*/React.createElement(PlaySheet, {
     slot: sheet.slot,
     player: byId[sheet.slot.playerId],
@@ -1620,7 +1870,7 @@ function GameTab({
     weekday: "short",
     month: "short",
     day: "numeric"
-  }) : ""), /*#__PURE__*/React.createElement("div", {
+  }) : "", game.gameInfo.scrim ? " · scrimmage" : ""), /*#__PURE__*/React.createElement("div", {
     className: "units"
   }, UNITS.map(u => /*#__PURE__*/React.createElement("button", {
     key: u.key,
@@ -1963,7 +2213,7 @@ function PlaySheet({
      so the game tracks yards allowed; sacks and TFLs ask for yards lost. */
   const isDefGain = unit === "defense" && (action === "tackle" || action === "assist");
   const needsYards = ["rush", "catch", "pass", "return", "kick", "sack", "tfl", "fumkept"].indexOf(action) >= 0 || isDefGain;
-  const isPassPlay = unit === "offense" && (action === "catch" || action === "incomplete");
+  const isPassPlay = unit === "offense" && (action === "catch" || action === "incomplete" || action === "pickedoff");
   const isLossPlay = action === "sack" || action === "tfl";
   const isTackleLike = ["tackle", "tfl", "sack"].indexOf(action) >= 0;
   if (!player) return null;
@@ -2253,7 +2503,7 @@ function EditPlaySheet({
     label: "Their punt — no return"
   }]);
   const isLoss = action === "sack" || action === "tfl";
-  const isPass = play.unit === "offense" && (action === "catch" || action === "incomplete");
+  const isPass = play.unit === "offense" && (action === "catch" || action === "incomplete" || action === "pickedoff");
   const isTheirPunt = action === "theirpunt";
   const isTackleLike = ["tackle", "tfl", "sack"].indexOf(action) >= 0;
   const save = () => {
@@ -2599,7 +2849,7 @@ function InsertPlaySheet({
     label: "Their punt — no return"
   }]);
   const isLoss = action === "sack" || action === "tfl";
-  const isPass = unit === "offense" && (action === "catch" || action === "incomplete");
+  const isPass = unit === "offense" && (action === "catch" || action === "incomplete" || action === "pickedoff");
   const isTheirPunt = action === "theirpunt";
   const save = () => {
     const y = isLoss || isTheirPunt ? Math.abs(parseInt(yards, 10) || 0) : parseInt(yards, 10) || 0;
@@ -3734,26 +3984,32 @@ function StatsTab({
   }
   const plays = rows.slice().sort((a, b) => a.s.snaps - b.s.snaps);
   const short = plays.filter(r => r.s.snaps < minPlays);
-  const teamRush = game.plays.reduce((a, p) => a + (p.unit === "offense" && p.action === "rush" ? p.yards || 0 : 0), 0);
-  const teamPass = game.plays.reduce((a, p) => a + (p.unit === "offense" && (p.action === "catch" || p.action === "pass") ? p.yards || 0 : 0), 0);
-  /* Yards the other team has gained against our defense (their losses count
-     back): tackles/assists log their gain, sacks and TFLs their loss, and
-     their scores carry the length of the play. */
-  const teamAllowed = game.plays.reduce((a, p) => {
-    if (p.type === "pen" || p.unit !== "defense" || p.them && p.action === "punt") return a;
-    const y = p.yards || 0;
-    return a + (p.action === "sack" || p.action === "tfl" ? -y : y);
-  }, 0);
-  /* Return yards stay separate from rushing/passing AND from each other,
-     split by which return team was on the field. */
-  const teamKR = game.plays.reduce((a, p) => a + (!p.them && p.unit === "special" && p.action === "return" && (p.stKey === "kickReturn" || p.stKey === "kickoff") ? p.yards || 0 : 0), 0);
-  const teamPR = game.plays.reduce((a, p) => a + (!p.them && p.unit === "special" && p.action === "return" && (p.stKey === "puntReturn" || p.stKey === "punt") ? p.yards || 0 : 0), 0);
+  const T = teamTotals(game.plays);
+  const drives = computeDrives(game.plays);
+  const margin = T.takeaways - T.giveaways;
+  const shareBox = () => {
+    const info = game.gameInfo || {};
+    shareText(boxScoreText({
+      opponent: info.opponent || "",
+      endedAt: new Date().toISOString(),
+      us: game.us,
+      them: game.them,
+      plays: game.plays,
+      scrim: !!info.scrim,
+      players: roster.map(p => ({
+        id: p.id,
+        num: p.num,
+        name: p.name,
+        s: statOf(p.id)
+      })).filter(r => r.s.snaps > 0)
+    }));
+  };
   const exportCsv = () => {
-    const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "BlkKicks", "Fumbles", "FumLost", "Tackles", "Assists", "TFL", "Sacks", "LossYds", "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
+    const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "IntThrown", "Kicks", "KickYds", "Touchbacks", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "BlkKicks", "Fumbles", "FumLost", "Tackles", "Assists", "TFL", "Sacks", "LossYds", "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
     const body = rows.slice().sort((a, b) => (parseInt(a.p.num, 10) || 0) - (parseInt(b.p.num, 10) || 0)).map(({
       p,
       s
-    }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY, s.cmp, s.att, s.passY, s.kicks, s.kickY, s.ret, s.retY, s.fgm, s.fga, s.convM, s.convA, s.blk, s.fum, s.fumL, s.tk, s.ast, s.tfl, s.sack, s.lossY, s.int, s.fr, s.pbu, s.pen, s.penY, s.td, s.pts]);
+    }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY, s.cmp, s.att, s.passY, s.intT, s.kicks, s.kickY, s.tb, s.ret, s.retY, s.fgm, s.fga, s.convM, s.convA, s.blk, s.fum, s.fumL, s.tk, s.ast, s.tfl, s.sack, s.lossY, s.int, s.fr, s.pbu, s.pen, s.penY, s.td, s.pts]);
     const csv = [head].concat(body).map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv");
   };
@@ -3783,7 +4039,7 @@ function StatsTab({
     style: {
       fontSize: 28
     }
-  }, teamRush)), /*#__PURE__*/React.createElement("div", {
+  }, T.rush)), /*#__PURE__*/React.createElement("div", {
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
@@ -3795,7 +4051,7 @@ function StatsTab({
     style: {
       fontSize: 28
     }
-  }, teamPass)), /*#__PURE__*/React.createElement("div", {
+  }, T.pass)), /*#__PURE__*/React.createElement("div", {
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
@@ -3807,7 +4063,7 @@ function StatsTab({
     style: {
       fontSize: 28
     }
-  }, teamRush + teamPass))), /*#__PURE__*/React.createElement("div", {
+  }, T.rush + T.pass))), /*#__PURE__*/React.createElement("div", {
     className: "board-top",
     style: {
       marginTop: 8
@@ -3824,7 +4080,7 @@ function StatsTab({
     style: {
       fontSize: 28
     }
-  }, teamKR)), /*#__PURE__*/React.createElement("div", {
+  }, T.kr)), /*#__PURE__*/React.createElement("div", {
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
@@ -3836,7 +4092,7 @@ function StatsTab({
     style: {
       fontSize: 28
     }
-  }, teamPR)), /*#__PURE__*/React.createElement("div", {
+  }, T.pr)), /*#__PURE__*/React.createElement("div", {
     className: "score-blk"
   }, /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
@@ -3848,9 +4104,50 @@ function StatsTab({
     style: {
       fontSize: 28
     }
-  }, teamAllowed)))), /*#__PURE__*/React.createElement("div", {
+  }, T.allowed))), /*#__PURE__*/React.createElement("div", {
+    className: "board-top",
+    style: {
+      marginTop: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "1st downs"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.fd)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "3rd down"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.thirdC, "/", T.thirdA)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Turnovers"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, (margin > 0 ? "+" : "") + margin)))), /*#__PURE__*/React.createElement("div", {
     className: "stbar"
-  }, [["plays", "Play count"], ["off", "Offense"], ["def", "Defense"], ["st", "Special"]].map(v => /*#__PURE__*/React.createElement("button", {
+  }, [["plays", "Play count"], ["off", "Offense"], ["def", "Defense"], ["st", "Special"], ["drv", "Drives"]].map(v => /*#__PURE__*/React.createElement("button", {
     key: v[0],
     className: view === v[0] ? "on" : "",
     onClick: () => setView(v[0])
@@ -3948,7 +4245,17 @@ function StatsTab({
     className: "n"
   }, s.convA ? s.convM + "/" + s.convA : "—"), /*#__PURE__*/React.createElement("td", {
     className: "n"
-  }, s.blk))))), /*#__PURE__*/React.createElement("div", {
+  }, s.blk))))), view === "drv" && (drives.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "empty-note"
+  }, "Drives show up once the offense takes the field.") : /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "#"), /*#__PURE__*/React.createElement("th", null, "Qtr"), /*#__PURE__*/React.createElement("th", null, "Plays"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Result"))), /*#__PURE__*/React.createElement("tbody", null, drives.map((d, i) => /*#__PURE__*/React.createElement("tr", {
+    key: i
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, i + 1)), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, "Q", d.q), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, d.plays), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, d.yards), /*#__PURE__*/React.createElement("td", null, d.result || "—")))))), /*#__PURE__*/React.createElement("div", {
     className: "sechd"
   }, /*#__PURE__*/React.createElement("div", {
     className: "h2"
@@ -3958,6 +4265,10 @@ function StatsTab({
       marginTop: 0
     }
   }, /*#__PURE__*/React.createElement("button", {
+    className: "abtn",
+    onClick: shareBox,
+    disabled: game.plays.length === 0
+  }, "Share box score"), /*#__PURE__*/React.createElement("button", {
     className: "abtn",
     onClick: exportCsv
   }, "Download stats"), /*#__PURE__*/React.createElement("button", {
@@ -3976,6 +4287,7 @@ function ScheduleSection({
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [opp, setOpp] = useState("");
+  const [scrim, setScrim] = useState(false);
   const sched = (squad.schedule || []).slice().sort((a, b) => a.date + "T" + (a.time || "") < b.date + "T" + (b.time || "") ? -1 : 1);
   const todayKey = new Date().toISOString().slice(0, 10);
   const upcoming = sched.filter(g => g.date >= todayKey).length;
@@ -3986,12 +4298,14 @@ function ScheduleSection({
         id: uid(),
         date,
         time,
-        opponent: opp.trim()
+        opponent: opp.trim(),
+        scrim
       }])
     }));
     setDate("");
     setTime("");
     setOpp("");
+    setScrim(false);
   };
   const remove = id => setSquad(s => Object.assign({}, s, {
     schedule: (s.schedule || []).filter(g => g.id !== id)
@@ -4048,7 +4362,22 @@ function ScheduleSection({
     onKeyDown: e => {
       if (e.key === "Enter") add();
     }
-  }), /*#__PURE__*/React.createElement("button", {
+  }), /*#__PURE__*/React.createElement("label", {
+    style: {
+      flex: "1 1 100%",
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      fontSize: 14,
+      color: "var(--soft)",
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    "aria-label": "Scrimmage",
+    checked: scrim,
+    onChange: e => setScrim(e.target.checked)
+  }), "Scrimmage \u2014 great for practice reps, stays out of the record and season stats"), /*#__PURE__*/React.createElement("button", {
     className: "mini dark",
     style: {
       flex: "1 1 100%",
@@ -4077,7 +4406,7 @@ function ScheduleSection({
       }
     }, "vs ", g.opponent), /*#__PURE__*/React.createElement("div", {
       className: "eyebrow"
-    }, fmtDate(g.date), " \xB7 ", fmtTime(g.time), g.done ? " · final " + g.us + "–" + g.them : past ? " · played" : "")), /*#__PURE__*/React.createElement("button", {
+    }, fmtDate(g.date), " \xB7 ", fmtTime(g.time), g.scrim ? " · scrimmage" : "", g.done ? " · final " + g.us + "–" + g.them : past ? " · played" : "")), /*#__PURE__*/React.createElement("button", {
       className: "mini dark",
       onClick: () => onTrack(g)
     }, "Add stats"), /*#__PURE__*/React.createElement("button", {
@@ -4097,7 +4426,8 @@ function SeasonTab({
   onImport,
   onTrack,
   reopenableId,
-  onReopen
+  onReopen,
+  live
 }) {
   const [year, setYear] = useState("all");
   const [view, setView] = useState("plays");
@@ -4108,7 +4438,8 @@ function SeasonTab({
     const patch = {
       opponent: editingGame.opponent.trim(),
       us: Math.max(0, parseInt(editingGame.us, 10) || 0),
-      them: Math.max(0, parseInt(editingGame.them, 10) || 0)
+      them: Math.max(0, parseInt(editingGame.them, 10) || 0),
+      scrim: !!editingGame.scrim
     };
     if (/^\d{4}-\d{2}-\d{2}$/.test(editingGame.date)) {
       patch.endedAt = new Date(editingGame.date + "T12:00:00").toISOString();
@@ -4124,16 +4455,20 @@ function SeasonTab({
     return Object.keys(ys).sort().reverse();
   }, [games]);
   const shown = year === "all" ? games : games.filter(g => (g.endedAt || "").slice(0, 4) === year);
-  const totals = useMemo(() => seasonTotals(shown), [shown]);
-  const wins = shown.filter(g => g.us > g.them).length;
-  const losses = shown.filter(g => g.us < g.them).length;
-  const ties = shown.length - wins - losses;
-  const pf = shown.reduce((a, g) => a + (g.us || 0), 0);
-  const pa = shown.reduce((a, g) => a + (g.them || 0), 0);
+  /* Scrimmages sit in the game list for their play-by-play, but never count
+     toward the record or the season stat totals. */
+  const counted = shown.filter(g => !g.scrim);
+  const liveCounts = !!(live && !live.scrim && (year === "all" || (live.endedAt || "").slice(0, 4) === year));
+  const totals = seasonTotals(counted.concat(liveCounts ? [live] : []));
+  const wins = counted.filter(g => g.us > g.them).length;
+  const losses = counted.filter(g => g.us < g.them).length;
+  const ties = counted.length - wins - losses;
+  const pf = counted.reduce((a, g) => a + (g.us || 0), 0);
+  const pa = counted.reduce((a, g) => a + (g.them || 0), 0);
   const newest = shown.slice().sort((a, b) => a.endedAt < b.endedAt ? 1 : -1);
   const exportCsv = () => {
-    const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "BlkKicks", "Fumbles", "FumLost", "Tackles", "Assists", "TFL", "Sacks", "LossYds", "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
-    const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0)).map(t => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY, t.cmp, t.att, t.passY, t.kicks, t.kickY, t.ret, t.retY, t.fgm, t.fga, t.convM, t.convA, t.blk, t.fum, t.fumL, t.tk, t.ast, t.tfl, t.sack, t.lossY, t.int, t.fr, t.pbu, t.pen, t.penY, t.td, t.pts]);
+    const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds", "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "IntThrown", "Kicks", "KickYds", "Touchbacks", "Returns", "RetYds", "FGM", "FGA", "ConvM", "ConvA", "BlkKicks", "Fumbles", "FumLost", "Tackles", "Assists", "TFL", "Sacks", "LossYds", "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
+    const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0)).map(t => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY, t.cmp, t.att, t.passY, t.intT, t.kicks, t.kickY, t.tb, t.ret, t.retY, t.fgm, t.fga, t.convM, t.convA, t.blk, t.fum, t.fumL, t.tk, t.ast, t.tfl, t.sack, t.lossY, t.int, t.fr, t.pbu, t.pen, t.penY, t.td, t.pts]);
     const csv = [head].concat(body).map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-season-" + (year === "all" ? "all" : year) + ".csv", csv, "text/csv");
   };
@@ -4197,7 +4532,13 @@ function SeasonTab({
     key: v[0],
     className: view === v[0] ? "on" : "",
     onClick: () => setView(v[0])
-  }, v[1]))), view === "plays" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "GP"), /*#__PURE__*/React.createElement("th", null, "Off"), /*#__PURE__*/React.createElement("th", null, "Def"), /*#__PURE__*/React.createElement("th", null, "Spec"), /*#__PURE__*/React.createElement("th", null, "Total"), /*#__PURE__*/React.createElement("th", null, "Pen"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.snaps - a.snaps).map(t => /*#__PURE__*/React.createElement("tr", {
+  }, v[1]))), liveCounts && /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "2px 0 8px",
+      textAlign: "center"
+    }
+  }, "Totals include the game on the board"), view === "plays" && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "GP"), /*#__PURE__*/React.createElement("th", null, "Off"), /*#__PURE__*/React.createElement("th", null, "Def"), /*#__PURE__*/React.createElement("th", null, "Spec"), /*#__PURE__*/React.createElement("th", null, "Total"), /*#__PURE__*/React.createElement("th", null, "Pen"))), /*#__PURE__*/React.createElement("tbody", null, totals.slice().sort((a, b) => b.snaps - a.snaps).map(t => /*#__PURE__*/React.createElement("tr", {
     key: t.id
   }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", t.num), " ", t.name), /*#__PURE__*/React.createElement("td", {
     className: "n"
@@ -4319,7 +4660,24 @@ function SeasonTab({
     onChange: e => setEditingGame(Object.assign({}, editingGame, {
       them: e.target.value
     }))
-  })), /*#__PURE__*/React.createElement("button", {
+  })), /*#__PURE__*/React.createElement("label", {
+    style: {
+      flex: "1 1 100%",
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      fontSize: 14,
+      color: "var(--soft)",
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    "aria-label": "Scrimmage game",
+    checked: !!editingGame.scrim,
+    onChange: e => setEditingGame(Object.assign({}, editingGame, {
+      scrim: e.target.checked
+    }))
+  }), "Scrimmage \u2014 keep it out of the record and season stats"), /*#__PURE__*/React.createElement("button", {
     className: "mini dark",
     style: {
       flex: 1,
@@ -4359,17 +4717,21 @@ function SeasonTab({
     }
   }, g.us > g.them ? "W" : g.us < g.them ? "L" : "T"), " ", g.opponent ? "vs " + g.opponent : "Game"), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, new Date(g.endedAt).toLocaleDateString(), " \xB7 ", g.playsCount, " plays", g.pending ? " · waiting to upload" : "")), g.id === reopenableId && /*#__PURE__*/React.createElement("button", {
+  }, new Date(g.endedAt).toLocaleDateString(), " \xB7 ", g.playsCount, " plays", g.scrim ? " · scrimmage" : "", g.pending ? " · waiting to upload" : "")), g.id === reopenableId && /*#__PURE__*/React.createElement("button", {
     className: "mini dark",
     onClick: () => onReopen(g)
   }, "Reopen"), /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    onClick: () => shareText(boxScoreText(g))
+  }, "Box"), /*#__PURE__*/React.createElement("button", {
     className: "mini",
     onClick: () => setEditingGame({
       id: g.id,
       opponent: g.opponent || "",
       date: (g.endedAt || "").slice(0, 10),
       us: String(g.us),
-      them: String(g.them)
+      them: String(g.them),
+      scrim: !!g.scrim
     })
   }, "Edit"), /*#__PURE__*/React.createElement("button", {
     className: "mini",
