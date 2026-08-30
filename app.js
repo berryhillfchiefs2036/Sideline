@@ -350,6 +350,9 @@ function fold(ops) {
   if (lastReset >= 0) live = live.slice(lastReset + 1);
   const g = BASE();
   live.forEach(o => {
+    /* qMark: this play carries an explicit "the quarter is N here" mark
+       (an amend). Marks can be cleared by amending quarter back to null. */
+    const qMarked = !!(amends[o.id] && amends[o.id].quarter);
     if (amends[o.id]) o = Object.assign({}, o, amends[o.id]);
     if (o.type === "set") {
       g[o.field] = o.value;
@@ -379,7 +382,8 @@ function fold(ops) {
       g.plays.push(Object.assign({}, o, {
         down: g.down,
         distance: g.distance,
-        quarter: g.quarter
+        quarter: g.quarter,
+        qMark: qMarked
       }));
       if (g.spot != null) {
         /* Move the mark with the walk-off, relative to which way the drive
@@ -404,7 +408,8 @@ function fold(ops) {
     g.plays.push(Object.assign({}, o, {
       down: g.down,
       distance: g.distance,
-      quarter: g.quarter
+      quarter: g.quarter,
+      qMark: qMarked
     }));
     /* Drive gain from this play: offense logs our gain directly; defense logs
        the OTHER team's gain (sack/TFL yards are entered as yards lost, so
@@ -2022,8 +2027,7 @@ function EditPlaySheet({
   const [kind, setKind] = useState(play.kind || "other");
   const [side, setSide] = useState(play.side || "offense");
   const [who, setWho] = useState(isPen ? play.playerId ? play.playerId : play.ours ? "us" : "them" : "them");
-  const [qtr, setQtr] = useState(String(play.quarter || 1));
-  const [qtrTouched, setQtrTouched] = useState(false);
+  const [qtr, setQtr] = useState(play.qMark ? String(play.quarter) : "auto");
   const actList = (play.unit === "offense" ? OFF_ACTIONS : play.unit === "defense" ? DEF_ACTIONS : ST_ACTIONS).concat([{
     key: "team",
     label: "Snap, no stat"
@@ -2037,12 +2041,13 @@ function EditPlaySheet({
   const isLoss = action === "sack" || action === "tfl";
   const isPass = play.unit === "offense" && (action === "catch" || action === "incomplete");
   const save = () => {
-    /* Pin the quarter when the coach touched the picker — even re-picking
-       the shown value counts, so a play can be anchored against a stray
-       quarter marker elsewhere. Untouched, other edits never pin it. */
-    const qPatch = qtrTouched || parseInt(qtr, 10) !== play.quarter ? {
+    /* "auto" = no mark on this play (clearing one if present); a number
+       marks that quarter as starting here. */
+    const qPatch = qtr === "auto" ? play.qMark ? {
+      quarter: null
+    } : {} : {
       quarter: parseInt(qtr, 10)
-    } : {};
+    };
     if (isPen) {
       onSave(Object.assign({
         playerId: who !== "them" && who !== "us" ? who : null,
@@ -2098,18 +2103,17 @@ function EditPlaySheet({
     style: {
       marginBottom: 6
     }
-  }, "Quarter"), /*#__PURE__*/React.createElement("select", {
+  }, "Quarter \u2014 currently in quarter ", play.quarter), /*#__PURE__*/React.createElement("select", {
     className: "inp",
     "aria-label": "Quarter",
     value: qtr,
-    onChange: e => {
-      setQtr(e.target.value);
-      setQtrTouched(true);
-    }
-  }, [1, 2, 3, 4].map(q => /*#__PURE__*/React.createElement("option", {
+    onChange: e => setQtr(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "auto"
+  }, "Same as the play before it", play.qMark ? " (clears the mark here)" : ""), [1, 2, 3, 4].map(q => /*#__PURE__*/React.createElement("option", {
     key: q,
     value: q
-  }, "Quarter ", q, q !== play.quarter ? "" : " (as logged)"))), /*#__PURE__*/React.createElement("div", {
+  }, "Quarter ", q, " starts at this play", play.qMark && q === play.quarter ? " — marked now" : ""))), /*#__PURE__*/React.createElement("div", {
     style: {
       height: 12
     }

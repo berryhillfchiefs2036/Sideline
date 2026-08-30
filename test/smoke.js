@@ -724,7 +724,7 @@ const type = (el, val) => {
   click($(".logline [aria-label='Edit this play']"));
   await flush();
   const qFix = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Quarter");
-  ok("edit sheet offers the quarter, prefilled", !!qFix && qFix.value === "1");
+  ok("unmarked play inherits its quarter", !!qFix && qFix.value === "auto");
   sSetter.call(qFix, "2");
   qFix.dispatchEvent(new w.Event("change", { bubbles: true }));
   await flush();
@@ -733,17 +733,28 @@ const type = (el, val) => {
   ok("quarter boundary appears at the corrected play", !!byText(".logline + .eyebrow, .eyebrow", "Quarter 1") ||
     $$(".eyebrow").some((e) => e.textContent.trim() === "Quarter 1"));
 
-  console.log("\nre-assert a quarter explicitly");
+  console.log("\nre-assert and clear a quarter mark");
   click($(".logline [aria-label='Edit this play']"));
   await flush();
   const qSame = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Quarter");
+  ok("marked play shows its mark in the picker", !!qSame && qSame.value === "2");
   sSetter.call(qSame, "2");
   qSame.dispatchEvent(new w.Event("change", { bubbles: true }));
   await flush();
   click(byText(".confirm", "Save the fix"));
   await flush();
-  ok("re-picking the shown quarter pins it without breaking the log",
+  ok("re-saving the mark keeps the boundary",
     $$(".eyebrow").some((e) => e.textContent.trim() === "Quarter 1"));
+  click($(".logline [aria-label='Edit this play']"));
+  await flush();
+  const qClr = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Quarter");
+  sSetter.call(qClr, "auto");
+  qClr.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Save the fix"));
+  await flush();
+  ok("clearing the mark removes the boundary",
+    !$$(".eyebrow").some((e) => e.textContent.trim() === "Quarter 1"));
 
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
