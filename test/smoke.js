@@ -464,6 +464,32 @@ const type = (el, val) => {
   click(byText(".nav button", "Game"));
   await flush();
 
+  console.log("\nfumble kept");
+  click(byText(".unit", "Offense"));
+  await flush();
+  const fumCard = $$(".pcard").find((c) => c.textContent.indexOf("Eli") >= 0);
+  click(fumCard.querySelector(".pc-top"));
+  await flush();
+  ok("both fumble options offered", !!byText(".opt", "Fumble, lost it") && !!byText(".opt", "Fumble, kept it"));
+  click(byText(".opt", "Fumble, kept it"));
+  await flush();
+  const fumYds = $(".yardbox select");
+  sSetter.call(fumYds, "2");
+  fumYds.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  ok("kept fumble is not a turnover — down advances",
+    $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("3rd & 22") >= 0);
+  click(byText(".nav button", "Stats"));
+  await flush();
+  click(byText(".stbar button", "Offense"));
+  await flush();
+  const eliFumRow = $$("tbody tr").find((r) => r.textContent.indexOf("Eli") >= 0);
+  ok("fumble counted without a lost ball", eliFumRow && eliFumRow.querySelectorAll("td")[7].textContent === "1");
+  click(byText(".nav button", "Game"));
+  await flush();
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

@@ -21,7 +21,8 @@ const OFF_ACTIONS = [
   { key: "catch", label: "Caught it", hint: "reception" },
   { key: "incomplete", label: "Incomplete pass", hint: "no catch" },
   { key: "conv", label: "Conversion try", hint: "add the score if good" },
-  { key: "fumble", label: "Fumbled", hint: "lost ball" },
+  { key: "fumble", label: "Fumble, lost it", hint: "they got the ball" },
+  { key: "fumkept", label: "Fumble, kept it", hint: "we recovered it" },
 ];
 const DEF_ACTIONS = [
   { key: "tackle", label: "Tackle", hint: "solo" },
@@ -94,7 +95,7 @@ const UNITS = [
 const VERB = { rush: "ran", catch: "caught", pass: "threw", incomplete: "incomplete pass", return: "returned",
   fga: "field goal attempt", conv: "conversion try", tackle: "tackle", tfl: "tackle for loss",
   assist: "assist", sack: "sack", int: "interception", fumrec: "recovery", pbu: "pass broken up",
-  fumble: "fumble", team: "team play", kick: "kicked" };
+  fumble: "fumble, lost", fumkept: "fumble, kept it", team: "team play", kick: "kicked" };
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const mkSlots = (labels) => labels.map((l) => ({ id: uid(), label: l, playerId: null, backupId: null }));
@@ -168,7 +169,7 @@ function fold(ops) {
 
 const blank = () => ({ snaps: 0, off: 0, def: 0, st: 0, rush: 0, rushY: 0, rec: 0, recY: 0,
   cmp: 0, att: 0, passY: 0, kicks: 0, kickY: 0, ret: 0, retY: 0, fgm: 0, fga: 0, convM: 0, convA: 0,
-  tk: 0, ast: 0, tfl: 0, sack: 0, lossY: 0, int: 0, fr: 0, pbu: 0, pen: 0, penY: 0, td: 0, pts: 0 });
+  fum: 0, fumL: 0, tk: 0, ast: 0, tfl: 0, sack: 0, lossY: 0, int: 0, fr: 0, pbu: 0, pen: 0, penY: 0, td: 0, pts: 0 });
 
 function tally(plays) {
   const m = {};
@@ -202,6 +203,8 @@ function tally(plays) {
     if (p.action === "conv") s.convA++;
     if (p.score === "fg") { s.fgm++; if (p.action !== "fga") s.fga++; }
     if (p.score === "pat" || p.score === "two") { s.convM++; if (p.action !== "conv") s.convA++; }
+    if (p.action === "fumble") { s.fum++; s.fumL++; }
+    if (p.action === "fumkept") s.fum++;
     if (p.action === "tackle") s.tk++;
     if (p.action === "assist") s.ast++;
     if (p.action === "tfl") { s.tfl++; s.tk++; s.lossY += y; }
@@ -847,7 +850,7 @@ function PlayLog({ game, byId, addOp }) {
               <span>
                 {pl ? <b>#{pl.num} {pl.name}</b> : <b>Whole unit</b>}{" "}
                 {VERB[p.action] || ""}{" "}
-                {["rush", "catch", "pass", "return", "kick"].indexOf(p.action) >= 0 ? p.yards + " yd" : ""}
+                {["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : ""}
                 {["sack", "tfl"].indexOf(p.action) >= 0 && p.yards ? "−" + p.yards + " yd" : ""}
                 {p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : ""}
                 {sc && <span style={{ color: "var(--stop)", fontWeight: 700 }}> · {sc.label}</span>}
@@ -879,7 +882,7 @@ function PlaySheet({ slot, player, unit, onField, byId, scores, onClose, onLog }
   const qbSlot = (onField || []).find((s) => s.playerId && s.playerId !== (player && player.id) &&
     (s.label || "").toUpperCase().indexOf("QB") >= 0);
   const [passerId, setPasserId] = useState(qbSlot ? qbSlot.playerId : "");
-  const needsYards = ["rush", "catch", "pass", "return", "kick", "sack", "tfl"].indexOf(action) >= 0;
+  const needsYards = ["rush", "catch", "pass", "return", "kick", "sack", "tfl", "fumkept"].indexOf(action) >= 0;
   const isPassPlay = unit === "offense" && (action === "catch" || action === "incomplete");
   /* Sacks and tackles for loss ask for the yards LOST (entered positive). */
   const isLossPlay = action === "sack" || action === "tfl";
@@ -1387,12 +1390,12 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
   const exportCsv = () => {
     const head = ["Number", "Name", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds",
       "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds",
-      "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "TFL", "Sacks", "LossYds", "Int", "FumRec", "PBU",
-      "Penalties", "PenYds", "TD", "Points"];
+      "FGM", "FGA", "ConvM", "ConvA", "Fumbles", "FumLost", "Tackles", "Assists", "TFL", "Sacks", "LossYds",
+      "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
     const body = rows.slice().sort((a, b) => (parseInt(a.p.num, 10) || 0) - (parseInt(b.p.num, 10) || 0))
       .map(({ p, s }) => [p.num, p.name, s.snaps, s.off, s.def, s.st, s.rush, s.rushY, s.rec, s.recY,
         s.cmp, s.att, s.passY, s.kicks, s.kickY, s.ret, s.retY, s.fgm, s.fga, s.convM, s.convA,
-        s.tk, s.ast, s.tfl, s.sack, s.lossY, s.int, s.fr, s.pbu, s.pen, s.penY, s.td, s.pts]);
+        s.fum, s.fumL, s.tk, s.ast, s.tfl, s.sack, s.lossY, s.int, s.fr, s.pbu, s.pen, s.penY, s.td, s.pts]);
     const csv = [head].concat(body).map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv");
   };
@@ -1451,7 +1454,7 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
 
       {view === "off" && (
         <table>
-          <thead><tr><th>Player</th><th>Car</th><th>Rush</th><th>Rec</th><th>Yds</th><th>Pass</th><th>PsYd</th><th>TD</th></tr></thead>
+          <thead><tr><th>Player</th><th>Car</th><th>Rush</th><th>Rec</th><th>Yds</th><th>Pass</th><th>PsYd</th><th>Fum</th><th>TD</th></tr></thead>
           <tbody>
             {rows.slice().sort((a, b) => (b.s.rushY + b.s.recY) - (a.s.rushY + a.s.recY)).map(({ p, s }) => (
               <tr key={p.id}>
@@ -1459,7 +1462,7 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
                 <td className="n">{s.rush}</td><td className="n">{s.rushY}</td>
                 <td className="n">{s.rec}</td><td className="n">{s.recY}</td>
                 <td className="n">{s.att ? s.cmp + "/" + s.att : "—"}</td>
-                <td className="n">{s.passY}</td><td className="n">{s.td}</td>
+                <td className="n">{s.passY}</td><td className="n">{s.fum}</td><td className="n">{s.td}</td>
               </tr>
             ))}
           </tbody>
@@ -1610,12 +1613,12 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
   const exportCsv = () => {
     const head = ["Number", "Name", "Games", "Plays", "Offense", "Defense", "Special", "Carries", "RushYds",
       "Catches", "RecYds", "PassCmp", "PassAtt", "PassYds", "Kicks", "KickYds", "Returns", "RetYds",
-      "FGM", "FGA", "ConvM", "ConvA", "Tackles", "Assists", "TFL", "Sacks", "LossYds", "Int", "FumRec", "PBU",
-      "Penalties", "PenYds", "TD", "Points"];
+      "FGM", "FGA", "ConvM", "ConvA", "Fumbles", "FumLost", "Tackles", "Assists", "TFL", "Sacks", "LossYds",
+      "Int", "FumRec", "PBU", "Penalties", "PenYds", "TD", "Points"];
     const body = totals.slice().sort((a, b) => (parseInt(a.num, 10) || 0) - (parseInt(b.num, 10) || 0))
       .map((t) => [t.num, t.name, t.gp, t.snaps, t.off, t.def, t.st, t.rush, t.rushY, t.rec, t.recY,
         t.cmp, t.att, t.passY, t.kicks, t.kickY, t.ret, t.retY, t.fgm, t.fga, t.convM, t.convA,
-        t.tk, t.ast, t.tfl, t.sack, t.lossY, t.int, t.fr, t.pbu, t.pen, t.penY, t.td, t.pts]);
+        t.fum, t.fumL, t.tk, t.ast, t.tfl, t.sack, t.lossY, t.int, t.fr, t.pbu, t.pen, t.penY, t.td, t.pts]);
     const csv = [head].concat(body).map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     download("sideline-season-" + (year === "all" ? "all" : year) + ".csv", csv, "text/csv");
   };
@@ -1693,7 +1696,7 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
           )}
           {view === "off" && (
             <table>
-              <thead><tr><th>Player</th><th>Car</th><th>Rush</th><th>Rec</th><th>Yds</th><th>Pass</th><th>PsYd</th><th>TD</th></tr></thead>
+              <thead><tr><th>Player</th><th>Car</th><th>Rush</th><th>Rec</th><th>Yds</th><th>Pass</th><th>PsYd</th><th>Fum</th><th>TD</th></tr></thead>
               <tbody>
                 {totals.slice().sort((a, b) => (b.rushY + b.recY) - (a.rushY + a.recY)).map((t) => (
                   <tr key={t.id}>
@@ -1701,7 +1704,7 @@ function SeasonTab({ games, squad, setSquad, onEdit, onRemove, onImport, onTrack
                     <td className="n">{t.rush}</td><td className="n">{t.rushY}</td>
                     <td className="n">{t.rec}</td><td className="n">{t.recY}</td>
                     <td className="n">{t.att ? t.cmp + "/" + t.att : "—"}</td>
-                    <td className="n">{t.passY}</td><td className="n">{t.td}</td>
+                    <td className="n">{t.passY}</td><td className="n">{t.fum}</td><td className="n">{t.td}</td>
                   </tr>
                 ))}
               </tbody>
