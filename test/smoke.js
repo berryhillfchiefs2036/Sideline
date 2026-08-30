@@ -574,6 +574,28 @@ const type = (el, val) => {
   click(byText(".nav button", "Game"));
   await flush();
 
+  console.log("\ntheir punt");
+  click(byText(".tick", "TD+"));
+  await flush();
+  ok("punt option offered on their play sheet", !!byText(".opt", "Punt — no return"));
+  click(byText(".opt", "Punt — no return"));
+  await flush();
+  const puntSel = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Their score length");
+  sSetter.call(puntSel, "30");
+  puntSel.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Log the punt"));
+  await flush();
+  ok("their punt gives us 1st & 10", $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("1st & 10") >= 0);
+  ok("board flips us to offense", byText(".unit", "Offense").className.indexOf("on") >= 0);
+  const puntLine = byText(".logline", "punt");
+  ok("punt logged with its distance", !!puntLine && puntLine.textContent.indexOf("30 yd") >= 0);
+  click(byText(".nav button", "Stats"));
+  await flush();
+  ok("punt yards don't count as yards allowed", $$(".score-num")[3].textContent === "38");
+  click(byText(".nav button", "Game"));
+  await flush();
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

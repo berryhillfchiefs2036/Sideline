@@ -101,7 +101,7 @@ const UNITS = [
   { key: "special", label: "Special" },
 ];
 const VERB = { rush: "ran", catch: "caught", pass: "threw", incomplete: "incomplete pass", return: "returned",
-  fga: "field goal attempt", conv: "conversion try", tackle: "tackle", tfl: "tackle for loss",
+  fga: "field goal attempt", conv: "conversion try", punt: "punt — no return", tackle: "tackle", tfl: "tackle for loss",
   assist: "assist", sack: "sack", int: "interception", fumrec: "recovery", pbu: "pass broken up",
   fumble: "fumble, lost", fumkept: "fumble, kept it", team: "team play", kick: "kicked" };
 
@@ -178,7 +178,10 @@ function fold(ops) {
     /* Ball-spot auto-tracking: our gains and kicks move the mark away from
        our goal; the other team's gains (defense unit) move it toward us. */
     if (g.spot != null) g.spot = clampSpot(g.spot + (o.unit === "defense" ? -gained : gained));
-    if (pts > 0) {
+    if (o.them && o.action === "punt") {
+      /* Their punt with no return: we take over with a fresh set of downs. */
+      g.down = 1; g.distance = 10; g.unit = "offense";
+    } else if (pts > 0) {
       /* o.them marks a score BY the other team (from the They-scored sheet);
          otherwise a defensive TD or safety is ours (pick-six and the like). */
       const ours = !o.them && (o.unit !== "defense" || o.score === "td" || o.score === "safety");
@@ -675,9 +678,9 @@ function Sideline() {
           onSave={(patch) => { addOp({ type: "amend", target: sheet.play.id, patch }); setSheet(null); }} />)}
       {sheet && sheet.type === "them" && (
         <ThemSheet scores={scores} onClose={() => setSheet(null)}
-          onLog={({ score, pts, yards }) => {
+          onLog={({ score, pts, yards, action }) => {
             addOp({ type: "play", unit: game.unit, stKey: game.unit === "special" ? game.stKey : null,
-              playerId: null, action: null, yards: yards || 0, passerId: null, them: true,
+              playerId: null, action: action || null, yards: yards || 0, passerId: null, them: true,
               score, pts, snaps: fieldIds });
             setSheet(null);
           }} />)}
@@ -1085,7 +1088,7 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
   const [playerId, setPlayerId] = useState(play.playerId || "");
   const [action, setAction] = useState(play.action || "team");
   const [yards, setYards] = useState(play.yards || 0);
-  const [score, setScore] = useState(play.score || "none");
+  const [score, setScore] = useState(play.them && play.action === "punt" ? "punt" : play.score || "none");
   const [passerId, setPasserId] = useState(play.passerId || "");
   const [kind, setKind] = useState(play.kind || "other");
   const [side, setSide] = useState(play.side || "offense");
@@ -1100,8 +1103,12 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
       onSave({ playerId: who !== "them" && who !== "us" ? who : null, ours: who !== "them",
         kind, side, yards: parseInt(yards, 10) || 0 });
     } else if (isThem) {
-      onSave({ score, pts: ((scores.find((x) => x.key === score)) || {}).pts || 0,
-        yards: score === "td" ? parseInt(yards, 10) || 0 : 0 });
+      if (score === "punt") {
+        onSave({ score: null, action: "punt", pts: null, yards: parseInt(yards, 10) || 0 });
+      } else {
+        onSave({ score, action: null, pts: ((scores.find((x) => x.key === score)) || {}).pts || 0,
+          yards: score === "td" ? parseInt(yards, 10) || 0 : 0 });
+      }
     } else {
       onSave({ playerId: playerId || null, action: action || null,
         yards: isLoss ? Math.abs(parseInt(yards, 10) || 0) : parseInt(yards, 10) || 0,
@@ -1153,17 +1160,20 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
 
         {isThem && (
           <React.Fragment>
-            <div className="eyebrow" style={{ marginBottom: 6 }}>What they scored</div>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>Their play</div>
             <div className="opts">
-              {scores.filter((s) => s.key !== "none").map((s) => (
+              {scores.filter((s) => s.key !== "none")
+                .concat([{ key: "punt", label: "Punt — no return", pts: 0 }]).map((s) => (
                 <button key={s.key} className={"opt" + (score === s.key ? " on" : "")} onClick={() => setScore(s.key)}>
-                  <div className="opt-l">{s.label}</div><div className="opt-h">+{s.pts} for them</div>
+                  <div className="opt-l">{s.label}</div>
+                  <div className="opt-h">{s.key === "punt" ? "we take over" : "+" + s.pts + " for them"}</div>
                 </button>
               ))}
             </div>
-            {score === "td" && (
+            {(score === "td" || score === "punt") && (
               <React.Fragment>
-                <div className="eyebrow" style={{ margin: "12px 0 6px" }}>How long was the score?</div>
+                <div className="eyebrow" style={{ margin: "12px 0 6px" }}>
+                  {score === "td" ? "How long was the score?" : "How far did the punt go?"}</div>
                 <select className="inp" aria-label="Their score length" value={yards}
                   onChange={(e) => setYards(parseInt(e.target.value, 10))}>
                   {Array.from({ length: 101 }, (_, i) => i).map((y) => (
@@ -1224,13 +1234,14 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
 function ThemSheet({ scores, onClose, onLog }) {
   const [score, setScore] = useState("td");
   const [yards, setYards] = useState(0);
-  const list = scores.filter((s) => s.key !== "none");
+  const list = scores.filter((s) => s.key !== "none")
+    .concat([{ key: "punt", label: "Punt — no return", pts: 0 }]);
   return (
     <div className="veil" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-hd">
           <div>
-            <div className="sheet-ttl">They scored</div>
+            <div className="sheet-ttl">Their play</div>
             <div className="eyebrow">Counts a snap for the kids on the field</div>
           </div>
           <button className="close" onClick={onClose}>Cancel</button>
@@ -1238,13 +1249,15 @@ function ThemSheet({ scores, onClose, onLog }) {
         <div className="opts">
           {list.map((s) => (
             <button key={s.key} className={"opt" + (score === s.key ? " on" : "")} onClick={() => setScore(s.key)}>
-              <div className="opt-l">{s.label}</div><div className="opt-h">+{s.pts} for them</div>
+              <div className="opt-l">{s.label}</div>
+              <div className="opt-h">{s.key === "punt" ? "we take over" : "+" + s.pts + " for them"}</div>
             </button>
           ))}
         </div>
-        {score === "td" && (
+        {(score === "td" || score === "punt") && (
           <React.Fragment>
-            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>How long was the score?</div>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>
+              {score === "td" ? "How long was the score?" : "How far did the punt go?"}</div>
             <select className="inp" aria-label="Their score length" value={yards}
               onChange={(e) => setYards(parseInt(e.target.value, 10))}>
               {Array.from({ length: 101 }, (_, i) => i).map((y) => (
@@ -1255,8 +1268,10 @@ function ThemSheet({ scores, onClose, onLog }) {
         )}
         <button className="confirm alt" onClick={() => {
           const sc = list.find((x) => x.key === score);
-          onLog({ score, pts: sc ? sc.pts : 0, yards: score === "td" ? yards : 0 });
-        }}>Put it on their side</button>
+          onLog({ score: score === "punt" ? null : score, action: score === "punt" ? "punt" : null,
+            pts: score === "punt" ? null : sc ? sc.pts : 0,
+            yards: score === "td" || score === "punt" ? yards : 0 });
+        }}>{score === "punt" ? "Log the punt" : "Put it on their side"}</button>
       </div>
     </div>
   );
@@ -1667,7 +1682,7 @@ function StatsTab({ roster, statOf, minPlays, game, onEndGame }) {
      back): tackles/assists log their gain, sacks and TFLs their loss, and
      their scores carry the length of the play. */
   const teamAllowed = game.plays.reduce((a, p) => {
-    if (p.type === "pen" || p.unit !== "defense") return a;
+    if (p.type === "pen" || p.unit !== "defense" || (p.them && p.action === "punt")) return a;
     const y = p.yards || 0;
     return a + (p.action === "sack" || p.action === "tfl" ? -y : y);
   }, 0);
