@@ -794,14 +794,12 @@ function PlaySheet({ slot, player, unit, onClose, onLog }) {
             <div className="eyebrow" style={{ textAlign: "center" }}>Yards</div>
             <div className={"yardnum " + (yards > 0 ? "gain" : yards < 0 ? "loss" : "zero")}>
               {yards > 0 ? "+" : ""}{yards}</div>
-            <div className="yardrow">
-              <button onClick={() => setYards((y) => y - 5)}>−5</button>
-              <button onClick={() => setYards((y) => y - 1)}>−1</button>
-              <button onClick={() => setYards(0)}>0</button>
-              <button onClick={() => setYards((y) => y + 1)}>+1</button>
-              <button onClick={() => setYards((y) => y + 5)}>+5</button>
-              <button onClick={() => setYards((y) => y + 10)}>+10</button>
-            </div>
+            <select className="inp" aria-label="Yards on the play" value={yards} style={{ marginTop: 8 }}
+              onChange={(e) => setYards(parseInt(e.target.value, 10))}>
+              {Array.from({ length: 120 }, (_, i) => i - 20).map((y) => (
+                <option key={y} value={y}>{(y > 0 ? "+" + y : y) + (Math.abs(y) === 1 ? " yard" : " yards")}</option>
+              ))}
+            </select>
           </div>
         )}
         <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Points on the play</div>

@@ -1339,21 +1339,20 @@ function PlaySheet({
     }
   }, "Yards"), /*#__PURE__*/React.createElement("div", {
     className: "yardnum " + (yards > 0 ? "gain" : yards < 0 ? "loss" : "zero")
-  }, yards > 0 ? "+" : "", yards), /*#__PURE__*/React.createElement("div", {
-    className: "yardrow"
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setYards(y => y - 5)
-  }, "\u22125"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setYards(y => y - 1)
-  }, "\u22121"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setYards(0)
-  }, "0"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setYards(y => y + 1)
-  }, "+1"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setYards(y => y + 5)
-  }, "+5"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setYards(y => y + 10)
-  }, "+10"))), /*#__PURE__*/React.createElement("div", {
+  }, yards > 0 ? "+" : "", yards), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Yards on the play",
+    value: yards,
+    style: {
+      marginTop: 8
+    },
+    onChange: e => setYards(parseInt(e.target.value, 10))
+  }, Array.from({
+    length: 120
+  }, (_, i) => i - 20).map(y => /*#__PURE__*/React.createElement("option", {
+    key: y,
+    value: y
+  }, (y > 0 ? "+" + y : y) + (Math.abs(y) === 1 ? " yard" : " yards"))))), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       margin: "12px 0 6px"

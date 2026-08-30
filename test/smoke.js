@@ -123,7 +123,11 @@ const type = (el, val) => {
   ok("play sheet opened", !!$(".sheet"));
   click(byText(".opt", "Ran it"));
   await flush();
-  for (let i = 0; i < 2; i++) click(byText(".yardrow button", "+5"));
+  const yardSel = $(".yardbox select");
+  ok("yards dropdown covers losses through 99", !!yardSel && yardSel.options.length === 120 &&
+    yardSel.options[0].value === "-20" && yardSel.options[119].value === "99");
+  sSetter.call(yardSel, "10");
+  yardSel.dispatchEvent(new w.Event("change", { bubbles: true }));
   await flush();
   ok("yards show +10", $(".yardnum").textContent.trim() === "+10");
   click(byText(".confirm", "Log the play"));
@@ -178,7 +182,9 @@ const type = (el, val) => {
   click(anyCard.querySelector(".pc-top"));
   await flush();
   click(byText(".opt", "Ran it"));
-  click(byText(".yardrow button", "+1"));
+  const yardSel2 = $(".yardbox select");
+  sSetter.call(yardSel2, "1");
+  yardSel2.dispatchEvent(new w.Event("change", { bubbles: true }));
   await flush();
   click(byText(".confirm", "Log the play"));
   await flush();
@@ -194,7 +200,9 @@ const type = (el, val) => {
   click(cardAgain.querySelector(".pc-top"));
   await flush();
   click(byText(".opt", "Ran it"));
-  click(byText(".yardrow button", "+1"));
+  const yardSel3 = $(".yardbox select");
+  sSetter.call(yardSel3, "1");
+  yardSel3.dispatchEvent(new w.Event("change", { bubbles: true }));
   await flush();
   click(byText(".confirm", "Log the play"));
   await flush();
