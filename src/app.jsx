@@ -61,7 +61,7 @@ const freshLineups = () => ({
   defense: mkSlots(DEFENSE_SLOTS),
   special: ST_KEYS.reduce((a, k) => Object.assign({}, a, { [k]: mkSlots(SPECIAL_TEAMS[k].slots) }), {}),
 });
-const freshSquad = () => ({ roster: [], lineups: freshLineups(), minPlays: 8, rev: 0 });
+const freshSquad = () => ({ roster: [], lineups: freshLineups(), minPlays: 8, schedule: [], rev: 0 });
 const BASE = () => ({ quarter: 1, us: 0, them: 0, down: 1, distance: 10, unit: "offense",
   stKey: "kickoff", swaps: {}, plays: [] });
 
@@ -487,8 +487,8 @@ function Sideline() {
         {tab === "roster" && <RosterTab squad={squad} setSquad={setSquad} statOf={statOf} />}
         {tab === "lineups" && <LineupsTab squad={squad} setSquad={setSquad} />}
         {tab === "stats" && <StatsTab {...{ roster, statOf, minPlays, game, addOp, code }} onArchive={archive} />}
-        {tab === "season" && <SeasonTab games={S.games} onRename={S.renameGame}
-          onRemove={S.removeGame} onImport={S.importGames} />}
+        {tab === "season" && <SeasonTab games={S.games} squad={squad} setSquad={setSquad}
+          onRename={S.renameGame} onRemove={S.removeGame} onImport={S.importGames} />}
       </div>
 
       {sheet && sheet.type === "play" && (
@@ -1161,7 +1161,68 @@ function StatsTab({ roster, statOf, minPlays, game, addOp, code, onArchive }) {
 
 /* ============================ SEASON ============================ */
 
-function SeasonTab({ games, onRename, onRemove, onImport }) {
+function ScheduleSection({ squad, setSquad }) {
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+  const [opp, setOpp] = useState("");
+  const sched = (squad.schedule || []).slice()
+    .sort((a, b) => ((a.date + "T" + (a.time || "")) < (b.date + "T" + (b.time || "")) ? -1 : 1));
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const upcoming = sched.filter((g) => g.date >= todayKey).length;
+
+  const add = () => {
+    if (!date || !opp.trim()) return;
+    setSquad((s) => Object.assign({}, s, {
+      schedule: (s.schedule || []).concat([{ id: uid(), date, time, opponent: opp.trim() }]) }));
+    setDate(""); setTime(""); setOpp("");
+  };
+  const remove = (id) =>
+    setSquad((s) => Object.assign({}, s, { schedule: (s.schedule || []).filter((g) => g.id !== id) }));
+
+  const fmtDate = (d) => new Date(d + "T12:00:00")
+    .toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  const fmtTime = (t) => (t ? new Date("2000-01-01T" + t)
+    .toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "time TBD");
+
+  return (
+    <React.Fragment>
+      <div className="sechd"><div className="h2">Schedule</div>
+        <div className="eyebrow">{upcoming} upcoming</div></div>
+      <div className="row" style={{ flexWrap: "wrap" }}>
+        <input className="inp sched-date" type="date" aria-label="Game date" value={date}
+          style={{ flex: "1 1 45%", minWidth: 130 }} onChange={(e) => setDate(e.target.value)} />
+        <input className="inp sched-time" type="time" aria-label="Kickoff time" value={time}
+          style={{ flex: "1 1 45%", minWidth: 110 }} onChange={(e) => setTime(e.target.value)} />
+        <input className="inp sched-opp" placeholder="Opposing team" value={opp}
+          style={{ flex: "1 1 100%" }} onChange={(e) => setOpp(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
+        <button className="mini dark" style={{ flex: "1 1 100%", padding: 11 }} onClick={add}>
+          Add to schedule</button>
+      </div>
+      {sched.length === 0 && (
+        <div className="empty-note">
+          No games on the schedule yet. Add each one above — date, kickoff time, and who you're playing.
+        </div>
+      )}
+      {sched.map((g) => {
+        const past = g.date < todayKey;
+        return (
+          <div className="row" key={g.id} style={past ? { opacity: 0.55 } : null}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>vs {g.opponent}</div>
+              <div className="eyebrow">{fmtDate(g.date)} · {fmtTime(g.time)}{past ? " · played" : ""}</div>
+            </div>
+            <button className="mini" onClick={() => {
+              if (window.confirm("Take this game off the schedule?")) remove(g.id);
+            }}>Remove</button>
+          </div>
+        );
+      })}
+    </React.Fragment>
+  );
+}
+
+function SeasonTab({ games, squad, setSquad, onRename, onRemove, onImport }) {
   const [year, setYear] = useState("all");
   const [view, setView] = useState("plays");
   const fileRef = useRef(null);
@@ -1211,6 +1272,8 @@ function SeasonTab({ games, onRename, onRemove, onImport }) {
     <React.Fragment>
       <div className="sechd"><div className="h2">Season</div>
         <div className="eyebrow">{shown.length} {shown.length === 1 ? "game" : "games"} · {wins}-{losses}{ties ? "-" + ties : ""}</div></div>
+
+      <ScheduleSection squad={squad} setSquad={setSquad} />
 
       {years.length > 1 && (
         <div className="stbar">

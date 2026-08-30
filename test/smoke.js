@@ -204,6 +204,20 @@ const type = (el, val) => {
   ok("season totals carry Jordan's snap", jordanRow && jordanRow.querySelectorAll("td")[5].textContent === "1");
   ok("games saved to localStorage", JSON.parse(store["sideline.solo.games"] || "[]").length === 1);
 
+  console.log("\nschedule");
+  type($(".sched-date"), "2026-09-12");
+  type($(".sched-time"), "10:30");
+  type($(".sched-opp"), "Bears");
+  await flush();
+  click(byText(".mini", "Add to schedule"));
+  await flush();
+  const schedRow = byText(".row", "vs Bears");
+  ok("scheduled game listed with the opponent", !!schedRow);
+  ok("scheduled game shows the date", schedRow && schedRow.textContent.indexOf("Sep") >= 0);
+  ok("scheduled game shows the kickoff time", schedRow && schedRow.textContent.indexOf("10:30") >= 0);
+  ok("schedule saved to localStorage",
+    JSON.parse(store["sideline.solo.squad"]).schedule.length === 1);
+
   console.log("\ndistance dropdown");
   click(byText(".nav button", "Game"));
   await flush();
