@@ -733,6 +733,18 @@ const type = (el, val) => {
   ok("quarter boundary appears at the corrected play", !!byText(".logline + .eyebrow, .eyebrow", "Quarter 1") ||
     $$(".eyebrow").some((e) => e.textContent.trim() === "Quarter 1"));
 
+  console.log("\nre-assert a quarter explicitly");
+  click($(".logline [aria-label='Edit this play']"));
+  await flush();
+  const qSame = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Quarter");
+  sSetter.call(qSame, "2");
+  qSame.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Save the fix"));
+  await flush();
+  ok("re-picking the shown quarter pins it without breaking the log",
+    $$(".eyebrow").some((e) => e.textContent.trim() === "Quarter 1"));
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

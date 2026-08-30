@@ -1137,6 +1137,7 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
   const [side, setSide] = useState(play.side || "offense");
   const [who, setWho] = useState(isPen ? (play.playerId ? play.playerId : play.ours ? "us" : "them") : "them");
   const [qtr, setQtr] = useState(String(play.quarter || 1));
+  const [qtrTouched, setQtrTouched] = useState(false);
   const actList = (play.unit === "offense" ? OFF_ACTIONS : play.unit === "defense" ? DEF_ACTIONS : ST_ACTIONS)
     .concat([{ key: "team", label: "Snap, no stat" },
       { key: "stopconv", label: "Stopped their try" }, { key: "block", label: "Blocked the kick" }]);
@@ -1144,9 +1145,11 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
   const isPass = play.unit === "offense" && (action === "catch" || action === "incomplete");
 
   const save = () => {
-    /* Only pin the quarter when the coach changed it, so plays keep
-       reflowing with upstream quarter fixes otherwise. */
-    const qPatch = parseInt(qtr, 10) !== play.quarter ? { quarter: parseInt(qtr, 10) } : {};
+    /* Pin the quarter when the coach touched the picker — even re-picking
+       the shown value counts, so a play can be anchored against a stray
+       quarter marker elsewhere. Untouched, other edits never pin it. */
+    const qPatch = qtrTouched || parseInt(qtr, 10) !== play.quarter
+      ? { quarter: parseInt(qtr, 10) } : {};
     if (isPen) {
       onSave(Object.assign({ playerId: who !== "them" && who !== "us" ? who : null, ours: who !== "them",
         kind, side, yards: parseInt(yards, 10) || 0 }, qPatch));
@@ -1179,7 +1182,8 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
         </div>
 
         <div className="eyebrow" style={{ marginBottom: 6 }}>Quarter</div>
-        <select className="inp" aria-label="Quarter" value={qtr} onChange={(e) => setQtr(e.target.value)}>
+        <select className="inp" aria-label="Quarter" value={qtr}
+          onChange={(e) => { setQtr(e.target.value); setQtrTouched(true); }}>
           {[1, 2, 3, 4].map((q) => (
             <option key={q} value={q}>Quarter {q}{q !== play.quarter ? "" : " (as logged)"}</option>
           ))}
