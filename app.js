@@ -895,10 +895,15 @@ const sb = CREW_ON ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseA
 const T_OPS = "sideline_ops";
 const T_SQUAD = "sideline_squads";
 const T_GAMES = "sideline_games";
+
+/* Crew codes: 6 characters from letters and digits 2-9 (no vowels, no 0/O
+   or 1/I look-alikes) — about 590 million combinations, so two teams never
+   collide by accident. Codes made before this were 4 characters; joining
+   and watching accept both lengths forever. */
 const makeCode = () => {
   const A = "BCDFGHJKLMNPQRSTVWXYZ23456789";
   return Array.from({
-    length: 4
+    length: 6
   }, () => A[Math.floor(Math.random() * A.length)]).join("");
 };
 
@@ -1181,7 +1186,7 @@ function useSideline() {
      lineups, and schedule along instead of starting the crew empty. Joining
      an existing code never does this, so a joiner can't clobber the crew. */
   const joinCrew = useCallback((c, name, carrySquad) => {
-    const clean = (c || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
+    const clean = (c || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
     if (clean.length < 4) return;
     const next = {
       id: meRef.current.id,
@@ -3434,7 +3439,7 @@ function CrewSheet({
       color: "var(--soft)",
       lineHeight: 1.5
     }
-  }, "Send the other coaches this page's link and these four letters. Everyone who types it in shares one roster, one score, one play log.")), /*#__PURE__*/React.createElement("div", {
+  }, "Send the other coaches this page's link and this code. Everyone who types it in shares one roster, one score, one play log.")), /*#__PURE__*/React.createElement("div", {
     className: "yardbox",
     style: {
       textAlign: "center",
@@ -3536,7 +3541,7 @@ function CrewSheet({
   }, "Or join one"), /*#__PURE__*/React.createElement("input", {
     className: "inp code-inp",
     placeholder: "CODE",
-    maxLength: 4,
+    maxLength: 6,
     value: entry,
     onChange: e => setEntry(e.target.value.toUpperCase())
   }), /*#__PURE__*/React.createElement("button", {
@@ -5280,7 +5285,7 @@ function GameCast({
 
 const WATCH_CODE = (() => {
   try {
-    const m = (window.location.search || "").match(/[?&]watch=([A-Za-z0-9]{4})/);
+    const m = (window.location.search || "").match(/[?&]watch=([A-Za-z0-9]{4,6})/);
     return m ? m[1].toUpperCase() : null;
   } catch (e) {
     return null;

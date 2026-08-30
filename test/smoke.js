@@ -903,6 +903,22 @@ const type = (el, val) => {
   ok("stats tab is still view-only", w2.document.querySelectorAll(".abtn").length === 0 &&
     w2.document.querySelectorAll(".tick").length === 0);
 
+  console.log("\nsix-character watch codes");
+  const dom3 = new JSDOM(html, { runScripts: "outside-only", pretendToBeVisual: true,
+    url: "https://example.test/?watch=bx7k2m" });
+  const w3 = dom3.window;
+  Object.defineProperty(w3, "localStorage", {
+    value: { getItem: () => null, setItem: () => {}, removeItem: () => {} } });
+  w3.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {} });
+  w3.eval(fs.readFileSync(path.join(root, "config.js"), "utf8"));
+  w3.eval(fs.readFileSync(path.join(root, "vendor/react.production.min.js"), "utf8"));
+  w3.eval(fs.readFileSync(path.join(root, "vendor/react-dom.production.min.js"), "utf8"));
+  w3.eval(fs.readFileSync(path.join(root, "vendor/supabase.min.js"), "utf8"));
+  w3.eval(fs.readFileSync(path.join(root, "app.js"), "utf8"));
+  await flush();
+  ok("a six-character watch link boots the gamecast",
+    !!w3.document.querySelector(".gc-field") && w3.document.body.textContent.indexOf("Gamecast") >= 0);
+
   console.log("\nreopen an ended game");
   const playsBeforeEnd = $(".dd-sub").textContent;
   click(byText(".abtn", "End game"));
