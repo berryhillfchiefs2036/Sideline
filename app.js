@@ -387,8 +387,10 @@ function fold(ops) {
       }));
       if (g.spot != null) {
         /* Move the mark with the walk-off, relative to which way the drive
-           is going (defense unit = the other team is driving at our goal). */
-        const dir = g.unit === "defense" ? -1 : 1;
+           is going (defense unit = the other team is driving at our goal).
+           The pen op carries the logging coach's unit; older ops fall back
+           to the folded unit. */
+        const dir = (o.unit || g.unit) === "defense" ? -1 : 1;
         g.spot = clampSpot(g.spot + (o.side === "offense" ? -(o.yards || 0) : o.yards || 0) * dir);
       }
       if (o.side === "defense") {
@@ -1039,6 +1041,11 @@ function Sideline() {
   const [tab, setTab] = useState("game");
   const [sheet, setSheet] = useState(null);
   const [moving, setMoving] = useState(null);
+  /* Which unit/formation THIS phone is looking at is local view state — each
+     coach browses freely without moving anyone else's screen. Plays record
+     the unit their coach was viewing when logging. */
+  const [unit, setUnit] = useState("offense");
+  const [stKey, setStKey] = useState("kickoff");
   const game = useMemo(() => fold(allOps), [allOps]);
   const stats = useMemo(() => tally(game.plays), [game.plays]);
   const statOf = id => stats[id] || blank();
@@ -1052,17 +1059,17 @@ function Sideline() {
     });
     return m;
   }, [roster]);
-  const unitSlots = (game.unit === "special" ? lineups.special[game.stKey] : lineups[game.unit]) || [];
-  const sKey = game.unit === "special" ? game.stKey : "u";
-  const swaps = (game.swaps[game.unit] || {})[sKey] || {};
+  const unitSlots = (unit === "special" ? lineups.special[stKey] : lineups[unit]) || [];
+  const sKey = unit === "special" ? stKey : "u";
+  const swaps = (game.swaps[unit] || {})[sKey] || {};
   const onField = unitSlots.map(s => Object.assign({}, s, {
     playerId: swaps[s.id] !== undefined ? swaps[s.id] : s.playerId
   }));
   const fieldIds = onField.map(s => s.playerId).filter(Boolean);
   const putIn = (slotId, playerId, group) => addOp({
     type: "sub",
-    unit: game.unit,
-    stKey: game.stKey,
+    unit,
+    stKey,
     slotId,
     playerId,
     group
@@ -1088,8 +1095,8 @@ function Sideline() {
   }) => {
     addOp({
       type: "play",
-      unit: game.unit,
-      stKey: game.unit === "special" ? game.stKey : null,
+      unit,
+      stKey: unit === "special" ? stKey : null,
       playerId: playerId || null,
       action: action || null,
       yards: yards || 0,
@@ -1209,7 +1216,11 @@ function Sideline() {
     moving,
     setMoving,
     assign,
-    onEndGame: endGame
+    onEndGame: endGame,
+    unit,
+    stKey,
+    setUnit,
+    setStKey
   }), tab === "roster" && /*#__PURE__*/React.createElement(RosterTab, {
     squad: squad,
     setSquad: setSquad,
@@ -1234,7 +1245,7 @@ function Sideline() {
   })), sheet && sheet.type === "play" && /*#__PURE__*/React.createElement(PlaySheet, {
     slot: sheet.slot,
     player: byId[sheet.slot.playerId],
-    unit: game.unit,
+    unit: unit,
     onField: onField,
     byId: byId,
     scores: scores,
@@ -1279,8 +1290,8 @@ function Sideline() {
     }) => {
       addOp({
         type: "play",
-        unit: game.unit,
-        stKey: game.unit === "special" ? game.stKey : null,
+        unit,
+        stKey: unit === "special" ? stKey : null,
         playerId: playerId || null,
         action: action || null,
         yards: yards || 0,
@@ -1290,6 +1301,7 @@ function Sideline() {
         pts,
         snaps: fieldIds
       });
+      if (action === "punt") setUnit("offense");
       setSheet(null);
     }
   }), sheet && sheet.type === "quarter" && /*#__PURE__*/React.createElement(QuarterSheet, {
@@ -1341,11 +1353,12 @@ function Sideline() {
     }
   }), sheet && sheet.type === "pen" && /*#__PURE__*/React.createElement(PenaltySheet, {
     roster: roster,
-    unit: game.unit,
+    unit: unit,
     onClose: () => setSheet(null),
     onLog: pen => {
       addOp(Object.assign({
-        type: "pen"
+        type: "pen",
+        unit
       }, pen));
       setSheet(null);
     }
@@ -1384,7 +1397,11 @@ function GameTab({
   moving,
   setMoving,
   assign,
-  onEndGame
+  onEndGame,
+  unit,
+  stKey,
+  setUnit,
+  setStKey
 }) {
   const set = (field, value) => addOp({
     type: "set",
@@ -1515,14 +1532,14 @@ function GameTab({
     className: "units"
   }, UNITS.map(u => /*#__PURE__*/React.createElement("button", {
     key: u.key,
-    className: "unit " + u.key + (game.unit === u.key ? " on" : ""),
-    onClick: () => set("unit", u.key)
-  }, u.label))), game.unit === "special" && /*#__PURE__*/React.createElement("div", {
+    className: "unit " + u.key + (unit === u.key ? " on" : ""),
+    onClick: () => setUnit(u.key)
+  }, u.label))), unit === "special" && /*#__PURE__*/React.createElement("div", {
     className: "stbar"
   }, ST_KEYS.map(k => /*#__PURE__*/React.createElement("button", {
     key: k,
-    className: game.stKey === k ? "on" : "",
-    onClick: () => set("stKey", k)
+    className: stKey === k ? "on" : "",
+    onClick: () => setStKey(k)
   }, SPECIAL_TEAMS[k].label))), moving && /*#__PURE__*/React.createElement("div", {
     className: "banner"
   }, /*#__PURE__*/React.createElement("b", null, "Moving ", movingPlayer ? "#" + movingPlayer.num + " " + movingPlayer.name : "player", "."), /*#__PURE__*/React.createElement("span", {

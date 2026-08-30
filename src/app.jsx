@@ -161,8 +161,10 @@ function fold(ops) {
       g.plays.push(Object.assign({}, o, { down: g.down, distance: g.distance, quarter: g.quarter, qMark: qMarked }));
       if (g.spot != null) {
         /* Move the mark with the walk-off, relative to which way the drive
-           is going (defense unit = the other team is driving at our goal). */
-        const dir = g.unit === "defense" ? -1 : 1;
+           is going (defense unit = the other team is driving at our goal).
+           The pen op carries the logging coach's unit; older ops fall back
+           to the folded unit. */
+        const dir = (o.unit || g.unit) === "defense" ? -1 : 1;
         g.spot = clampSpot(g.spot + (o.side === "offense" ? -(o.yards || 0) : o.yards || 0) * dir);
       }
       if (o.side === "defense") {
@@ -568,6 +570,11 @@ function Sideline() {
   const [tab, setTab] = useState("game");
   const [sheet, setSheet] = useState(null);
   const [moving, setMoving] = useState(null);
+  /* Which unit/formation THIS phone is looking at is local view state — each
+     coach browses freely without moving anyone else's screen. Plays record
+     the unit their coach was viewing when logging. */
+  const [unit, setUnit] = useState("offense");
+  const [stKey, setStKey] = useState("kickoff");
 
   const game = useMemo(() => fold(allOps), [allOps]);
   const stats = useMemo(() => tally(game.plays), [game.plays]);
@@ -577,15 +584,15 @@ function Sideline() {
     const m = {}; roster.forEach((p) => { m[p.id] = p; }); return m;
   }, [roster]);
 
-  const unitSlots = (game.unit === "special" ? lineups.special[game.stKey] : lineups[game.unit]) || [];
-  const sKey = game.unit === "special" ? game.stKey : "u";
-  const swaps = (game.swaps[game.unit] || {})[sKey] || {};
+  const unitSlots = (unit === "special" ? lineups.special[stKey] : lineups[unit]) || [];
+  const sKey = unit === "special" ? stKey : "u";
+  const swaps = (game.swaps[unit] || {})[sKey] || {};
   const onField = unitSlots.map((s) => Object.assign({}, s, {
     playerId: swaps[s.id] !== undefined ? swaps[s.id] : s.playerId }));
   const fieldIds = onField.map((s) => s.playerId).filter(Boolean);
 
   const putIn = (slotId, playerId, group) =>
-    addOp({ type: "sub", unit: game.unit, stKey: game.stKey, slotId, playerId, group });
+    addOp({ type: "sub", unit, stKey, slotId, playerId, group });
   const assign = (slot, playerId) => {
     const group = uid();
     if (!playerId) { putIn(slot.id, null, group); return; }
@@ -595,7 +602,7 @@ function Sideline() {
   };
   const scores = scoresFor(squad.scoring || "elementary");
   const logPlay = ({ playerId, action, yards, score, passerId, scorePts }) => {
-    addOp({ type: "play", unit: game.unit, stKey: game.unit === "special" ? game.stKey : null,
+    addOp({ type: "play", unit, stKey: unit === "special" ? stKey : null,
       playerId: playerId || null, action: action || null, yards: yards || 0, passerId: passerId || null,
       score: score && score !== "none" ? score : null,
       pts: score && score !== "none" ? scorePts || 0 : null, snaps: fieldIds });
@@ -674,7 +681,8 @@ function Sideline() {
         </button>
 
         {tab === "game" && <GameTab {...{ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay,
-          undo, canUndo: !!lastUndoable, roster, moving, setMoving, assign, onEndGame: endGame }} />}
+          undo, canUndo: !!lastUndoable, roster, moving, setMoving, assign, onEndGame: endGame,
+          unit, stKey, setUnit, setStKey }} />}
         {tab === "roster" && <RosterTab squad={squad} setSquad={setSquad} statOf={statOf} />}
         {tab === "lineups" && <LineupsTab squad={squad} setSquad={setSquad} />}
         {tab === "stats" && <StatsTab {...{ roster, statOf, minPlays, game }} onEndGame={endGame} />}
@@ -683,7 +691,7 @@ function Sideline() {
       </div>
 
       {sheet && sheet.type === "play" && (
-        <PlaySheet slot={sheet.slot} player={byId[sheet.slot.playerId]} unit={game.unit}
+        <PlaySheet slot={sheet.slot} player={byId[sheet.slot.playerId]} unit={unit}
           onField={onField} byId={byId} scores={scores} onClose={() => setSheet(null)} onLog={logPlay} />)}
       {sheet && sheet.type === "sub" && (
         <SubSheet slot={sheet.slot} roster={roster} byId={byId} onField={onField} statOf={statOf}
@@ -696,9 +704,10 @@ function Sideline() {
       {sheet && sheet.type === "them" && (
         <ThemSheet scores={scores} roster={roster} onClose={() => setSheet(null)}
           onLog={({ score, pts, yards, action, playerId, ours }) => {
-            addOp({ type: "play", unit: game.unit, stKey: game.unit === "special" ? game.stKey : null,
+            addOp({ type: "play", unit, stKey: unit === "special" ? stKey : null,
               playerId: playerId || null, action: action || null, yards: yards || 0, passerId: null,
               them: ours ? null : true, score, pts, snaps: fieldIds });
+            if (action === "punt") setUnit("offense");
             setSheet(null);
           }} />)}
       {sheet && sheet.type === "quarter" && (
@@ -718,8 +727,8 @@ function Sideline() {
         <SpotSheet spot={game.spot} onClose={() => setSheet(null)}
           onSet={(v) => { addOp({ type: "set", field: "spot", value: v }); setSheet(null); }} />)}
       {sheet && sheet.type === "pen" && (
-        <PenaltySheet roster={roster} unit={game.unit} onClose={() => setSheet(null)}
-          onLog={(pen) => { addOp(Object.assign({ type: "pen" }, pen)); setSheet(null); }} />)}
+        <PenaltySheet roster={roster} unit={unit} onClose={() => setSheet(null)}
+          onLog={(pen) => { addOp(Object.assign({ type: "pen", unit }, pen)); setSheet(null); }} />)}
       {sheet && sheet.type === "crew" && (
         <CrewSheet me={S.me} code={code} sync={sync} available={S.crewAvailable} onJoin={S.joinCrew}
           onLeave={S.leaveCrew} onRename={S.renameMe} onClose={() => setSheet(null)} />)}
@@ -735,7 +744,7 @@ function Sideline() {
 
 /* ============================ GAME TAB ============================ */
 
-function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay, undo, canUndo, roster, moving, setMoving, assign, onEndGame }) {
+function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay, undo, canUndo, roster, moving, setMoving, assign, onEndGame, unit, stKey, setUnit, setStKey }) {
   const set = (field, value) => addOp({ type: "set", field, value });
   const filled = onField.filter((s) => s.playerId).length;
   const movingSlot = moving ? onField.find((s) => s.id === moving) : null;
@@ -807,15 +816,15 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
 
       <div className="units">
         {UNITS.map((u) => (
-          <button key={u.key} className={"unit " + u.key + (game.unit === u.key ? " on" : "")}
-            onClick={() => set("unit", u.key)}>{u.label}</button>
+          <button key={u.key} className={"unit " + u.key + (unit === u.key ? " on" : "")}
+            onClick={() => setUnit(u.key)}>{u.label}</button>
         ))}
       </div>
 
-      {game.unit === "special" && (
+      {unit === "special" && (
         <div className="stbar">
           {ST_KEYS.map((k) => (
-            <button key={k} className={game.stKey === k ? "on" : ""} onClick={() => set("stKey", k)}>
+            <button key={k} className={stKey === k ? "on" : ""} onClick={() => setStKey(k)}>
               {SPECIAL_TEAMS[k].label}</button>
           ))}
         </div>
