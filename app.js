@@ -50,8 +50,12 @@ const OFF_ACTIONS = [{
   hint: "no catch"
 }, {
   key: "conv",
-  label: "Conversion try",
-  hint: "add the score if good"
+  label: "Conversion good",
+  hint: "pick the points below"
+}, {
+  key: "convfail",
+  label: "Conversion failed",
+  hint: "attempt counts, no points"
 }, {
   key: "fumble",
   label: "Fumble, lost it",
@@ -104,8 +108,12 @@ const ST_ACTIONS = [{
   hint: "add the score if good"
 }, {
   key: "conv",
-  label: "Conversion try",
-  hint: "add the score if good"
+  label: "Conversion good",
+  hint: "pick the points below"
+}, {
+  key: "convfail",
+  label: "Conversion failed",
+  hint: "attempt counts, no points"
 }, {
   key: "tackle",
   label: "Tackle",
@@ -274,6 +282,7 @@ const VERB = {
   return: "returned",
   fga: "field goal attempt",
   conv: "conversion try",
+  convfail: "conversion try — no good",
   punt: "punt — no return",
   stopconv: "stopped their try",
   block: "blocked the kick",
@@ -413,8 +422,9 @@ function fold(ops) {
       if (ours) g.us += pts;else g.them += pts;
       g.down = 1;
       g.distance = 10;
-    } else if ((o.unit === "offense" || o.unit === "defense") && o.action !== "stopconv" && o.action !== "block") {
-      /* stopconv/block are failed conversion tries — no down to advance. */
+    } else if ((o.unit === "offense" || o.unit === "defense") && o.action !== "stopconv" && o.action !== "block" && o.action !== "conv" && o.action !== "convfail") {
+      /* Conversion tries (ours or theirs, made or failed) sit outside the
+         drive — there's no down to advance. */
       const turnover = o.action === "int" || o.action === "fumrec" || o.action === "fumble";
       if (turnover) {
         g.down = 1;
@@ -528,6 +538,7 @@ function tally(plays) {
        other action still count as attempts via their score below. */
     if (p.action === "fga") s.fga++;
     if (p.action === "conv") s.convA++;
+    if (p.action === "convfail") s.convA++;
     if (p.score === "fg") {
       s.fgm++;
       if (p.action !== "fga") s.fga++;

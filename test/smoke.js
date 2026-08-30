@@ -371,7 +371,7 @@ const type = (el, val) => {
   ok("kicker subbed onto the kickoff team", !!kickCard);
   click(kickCard.querySelector(".pc-top"));
   await flush();
-  ok("FG attempt and conversion try are options", !!byText(".opt", "FG attempt") && !!byText(".opt", "Conversion try"));
+  ok("FG attempt and conversion options offered", !!byText(".opt", "FG attempt") && !!byText(".opt", "Conversion good"));
   click(byText(".opt", "Kicked it"));
   await flush();
   const kickSel = $(".yardbox select");
@@ -677,6 +677,26 @@ const type = (el, val) => {
   click(byText(".mini", "Show recent"));
   await flush();
   ok("log collapses back to recent plays", $$(".logline").length === 14);
+
+  console.log("\nfailed conversion try");
+  const tryCard = $$(".pcard").find((c) => c.textContent.indexOf("Eli") >= 0);
+  click(tryCard.querySelector(".pc-top"));
+  await flush();
+  ok("conversion failed is an option", !!byText(".opt", "Conversion failed"));
+  const ddBeforeTry = $(".dd-main").textContent;
+  click(byText(".opt", "Conversion failed"));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  ok("failed try leaves down & distance alone", $(".dd-main").textContent === ddBeforeTry);
+  click(byText(".nav button", "Stats"));
+  await flush();
+  click(byText(".stbar button", "Special"));
+  await flush();
+  const eliTryRow = $$("tbody tr").find((r) => r.textContent.indexOf("Eli") >= 0);
+  ok("failed try charged the attempt", eliTryRow && eliTryRow.querySelectorAll("td")[6].textContent === "1/2");
+  click(byText(".nav button", "Game"));
+  await flush();
 
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);

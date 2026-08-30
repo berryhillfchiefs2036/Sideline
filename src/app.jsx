@@ -20,7 +20,8 @@ const OFF_ACTIONS = [
   { key: "rush", label: "Ran it", hint: "carry" },
   { key: "catch", label: "Caught it", hint: "reception" },
   { key: "incomplete", label: "Incomplete pass", hint: "no catch" },
-  { key: "conv", label: "Conversion try", hint: "add the score if good" },
+  { key: "conv", label: "Conversion good", hint: "pick the points below" },
+  { key: "convfail", label: "Conversion failed", hint: "attempt counts, no points" },
   { key: "fumble", label: "Fumble, lost it", hint: "they got the ball" },
   { key: "fumkept", label: "Fumble, kept it", hint: "we recovered it" },
 ];
@@ -37,7 +38,8 @@ const ST_ACTIONS = [
   { key: "kick", label: "Kicked it", hint: "kick / punt" },
   { key: "return", label: "Returned it", hint: "runback" },
   { key: "fga", label: "FG attempt", hint: "add the score if good" },
-  { key: "conv", label: "Conversion try", hint: "add the score if good" },
+  { key: "conv", label: "Conversion good", hint: "pick the points below" },
+  { key: "convfail", label: "Conversion failed", hint: "attempt counts, no points" },
   { key: "tackle", label: "Tackle", hint: "coverage" },
   { key: "fumrec", label: "Recovered", hint: "loose ball" },
 ];
@@ -101,7 +103,7 @@ const UNITS = [
   { key: "special", label: "Special" },
 ];
 const VERB = { rush: "ran", catch: "caught", pass: "threw", incomplete: "incomplete pass", return: "returned",
-  fga: "field goal attempt", conv: "conversion try", punt: "punt — no return",
+  fga: "field goal attempt", conv: "conversion try", convfail: "conversion try — no good", punt: "punt — no return",
   stopconv: "stopped their try", block: "blocked the kick", tackle: "tackle", tfl: "tackle for loss",
   assist: "assist", sack: "sack", int: "interception", fumrec: "recovery", pbu: "pass broken up",
   fumble: "fumble, lost", fumkept: "fumble, kept it", team: "team play", kick: "kicked" };
@@ -189,8 +191,10 @@ function fold(ops) {
       if (ours) g.us += pts; else g.them += pts;
       g.down = 1; g.distance = 10;
     } else if ((o.unit === "offense" || o.unit === "defense")
-        && o.action !== "stopconv" && o.action !== "block") {
-      /* stopconv/block are failed conversion tries — no down to advance. */
+        && o.action !== "stopconv" && o.action !== "block"
+        && o.action !== "conv" && o.action !== "convfail") {
+      /* Conversion tries (ours or theirs, made or failed) sit outside the
+         drive — there's no down to advance. */
       const turnover = o.action === "int" || o.action === "fumrec" || o.action === "fumble";
       if (turnover) { g.down = 1; g.distance = 10; g.unit = o.unit === "offense" ? "defense" : "offense"; }
       else if (gained >= g.distance) { g.down = 1; g.distance = 10; }
@@ -238,6 +242,7 @@ function tally(plays) {
        other action still count as attempts via their score below. */
     if (p.action === "fga") s.fga++;
     if (p.action === "conv") s.convA++;
+    if (p.action === "convfail") s.convA++;
     if (p.score === "fg") { s.fgm++; if (p.action !== "fga") s.fga++; }
     if (p.score === "pat" || p.score === "two") { s.convM++; if (p.action !== "conv") s.convA++; }
     if (p.action === "fumble") { s.fum++; s.fumL++; }
