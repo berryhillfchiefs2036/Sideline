@@ -889,6 +889,19 @@ const type = (el, val) => {
     w2.document.body.textContent.indexOf("Ball on") >= 0 &&
     w2.document.body.textContent.indexOf("Drive") >= 0);
   ok("no ball marker until the coaches track the spot", !w2.document.querySelector(".gc-ball"));
+  const gsBtn = Array.from(w2.document.querySelectorAll(".stbar button"))
+    .find((b) => b.textContent.indexOf("Game stats") >= 0);
+  ok("game stats tab offered on the gamecast", !!gsBtn);
+  gsBtn.dispatchEvent(new w2.MouseEvent("click", { bubbles: true }));
+  await flush();
+  ok("stats tab shows the team tiles", w2.document.body.textContent.indexOf("Rush yds") >= 0 &&
+    w2.document.body.textContent.indexOf("1st downs") >= 0 &&
+    w2.document.body.textContent.indexOf("Turnovers") >= 0);
+  ok("stats tab offers the player and drive views",
+    !!Array.from(w2.document.querySelectorAll(".stbar button")).find((b) => b.textContent === "Defense") &&
+    !!Array.from(w2.document.querySelectorAll(".stbar button")).find((b) => b.textContent === "Drives"));
+  ok("stats tab is still view-only", w2.document.querySelectorAll(".abtn").length === 0 &&
+    w2.document.querySelectorAll(".tick").length === 0);
 
   console.log("\nreopen an ended game");
   const playsBeforeEnd = $(".dd-sub").textContent;

@@ -4837,6 +4837,8 @@ function GameCast({
   const [ops, setOps] = useState([]);
   const [squad, setSquadState] = useState(() => freshSquad());
   const [status, setStatus] = useState(sb ? "connecting" : "noconfig");
+  const [view, setView] = useState("cast");
+  const [sview, setSview] = useState("off");
   useEffect(() => {
     if (!sb) return undefined;
     let alive = true;
@@ -4904,6 +4906,14 @@ function GameCast({
   const drives = computeDrives(game.plays);
   const lastDrive = drives.length ? drives[drives.length - 1] : null;
   const curDrive = lastDrive && lastDrive.result === "On the field" ? lastDrive : null;
+  /* Game stats tab: the same numbers the coaches see, view-only. */
+  const T = teamTotals(game.plays);
+  const margin = T.takeaways - T.giveaways;
+  const stats = useMemo(() => tally(game.plays), [game.plays]);
+  const rows = (squad.roster || []).map(p => ({
+    p,
+    s: stats[p.id] || blank()
+  })).filter(r => r.s.snaps > 0);
   const toGain = game.spot != null ? clampSpot(game.unit === "defense" ? game.spot - game.distance : game.spot + game.distance) : null;
   return /*#__PURE__*/React.createElement("div", {
     className: "sl"
@@ -4949,6 +4959,15 @@ function GameCast({
   }, oppName), /*#__PURE__*/React.createElement("div", {
     className: "score-num"
   }, game.them)))), /*#__PURE__*/React.createElement("div", {
+    className: "stbar",
+    style: {
+      marginTop: 10
+    }
+  }, [["cast", "Gamecast"], ["stats", "Game stats"]].map(t => /*#__PURE__*/React.createElement("button", {
+    key: t[0],
+    className: view === t[0] ? "on" : "",
+    onClick: () => setView(t[0])
+  }, t[1]))), view === "cast" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "gc-meta"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "eyebrow"
@@ -5049,7 +5068,212 @@ function GameCast({
       textAlign: "left",
       marginTop: 14
     }
-  }, "View only \u2014 you're following along live. Scores and plays appear here seconds after the coaches log them.")));
+  }, "View only \u2014 you're following along live. Scores and plays appear here seconds after the coaches log them.")), view === "stats" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "board",
+    style: {
+      marginTop: 10,
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "board-top"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Rush yds"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.rush)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Pass yds"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.pass)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Total off."), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.rush + T.pass))), /*#__PURE__*/React.createElement("div", {
+    className: "board-top",
+    style: {
+      marginTop: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "KO ret yds"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.kr)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Punt ret yds"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.pr)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Allowed"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.allowed))), /*#__PURE__*/React.createElement("div", {
+    className: "board-top",
+    style: {
+      marginTop: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "1st downs"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.fd)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "3rd down"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, T.thirdC, "/", T.thirdA)), /*#__PURE__*/React.createElement("div", {
+    className: "score-blk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      color: "#8FA394"
+    }
+  }, "Turnovers"), /*#__PURE__*/React.createElement("div", {
+    className: "score-num",
+    style: {
+      fontSize: 28
+    }
+  }, (margin > 0 ? "+" : "") + margin)))), /*#__PURE__*/React.createElement("div", {
+    className: "stbar"
+  }, [["off", "Offense"], ["def", "Defense"], ["st", "Special"], ["drv", "Drives"]].map(v => /*#__PURE__*/React.createElement("button", {
+    key: v[0],
+    className: sview === v[0] ? "on" : "",
+    onClick: () => setSview(v[0])
+  }, v[1]))), sview !== "drv" && rows.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "empty-note"
+  }, "Player stats fill in as the coaches log plays."), sview === "off" && rows.length > 0 && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Car"), /*#__PURE__*/React.createElement("th", null, "Rush"), /*#__PURE__*/React.createElement("th", null, "Rec"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Pass"), /*#__PURE__*/React.createElement("th", null, "PsYd"), /*#__PURE__*/React.createElement("th", null, "Fum"), /*#__PURE__*/React.createElement("th", null, "TD"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.rushY + b.s.recY - (a.s.rushY + a.s.recY)).map(({
+    p,
+    s
+  }) => /*#__PURE__*/React.createElement("tr", {
+    key: p.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", p.num), " ", p.name), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.rush), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.rushY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.rec), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.recY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.att ? s.cmp + "/" + s.att : "—"), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.passY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.fum), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.td))))), sview === "def" && rows.length > 0 && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Tkl"), /*#__PURE__*/React.createElement("th", null, "Ast"), /*#__PURE__*/React.createElement("th", null, "TFL"), /*#__PURE__*/React.createElement("th", null, "Sck"), /*#__PURE__*/React.createElement("th", null, "LsYd"), /*#__PURE__*/React.createElement("th", null, "Int"), /*#__PURE__*/React.createElement("th", null, "FR"), /*#__PURE__*/React.createElement("th", null, "PBU"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.tk - a.s.tk).map(({
+    p,
+    s
+  }) => /*#__PURE__*/React.createElement("tr", {
+    key: p.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", p.num), " ", p.name), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.tk), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.ast), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.tfl), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.sack), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.lossY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.int), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.fr), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.pbu))))), sview === "st" && rows.length > 0 && /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Player"), /*#__PURE__*/React.createElement("th", null, "Kicks"), /*#__PURE__*/React.createElement("th", null, "KYds"), /*#__PURE__*/React.createElement("th", null, "Ret"), /*#__PURE__*/React.createElement("th", null, "RYds"), /*#__PURE__*/React.createElement("th", null, "FG"), /*#__PURE__*/React.createElement("th", null, "Conv"), /*#__PURE__*/React.createElement("th", null, "Blk"))), /*#__PURE__*/React.createElement("tbody", null, rows.slice().sort((a, b) => b.s.kickY + b.s.retY - (a.s.kickY + a.s.retY)).map(({
+    p,
+    s
+  }) => /*#__PURE__*/React.createElement("tr", {
+    key: p.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, "#", p.num), " ", p.name), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.kicks), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.kickY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.ret), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.retY), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.fga ? s.fgm + "/" + s.fga : "—"), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.convA ? s.convM + "/" + s.convA : "—"), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, s.blk))))), sview === "drv" && (drives.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "empty-note"
+  }, "Drives show up once the offense takes the field.") : /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "#"), /*#__PURE__*/React.createElement("th", null, "Qtr"), /*#__PURE__*/React.createElement("th", null, "Plays"), /*#__PURE__*/React.createElement("th", null, "Yds"), /*#__PURE__*/React.createElement("th", null, "Result"))), /*#__PURE__*/React.createElement("tbody", null, drives.map((d, i) => /*#__PURE__*/React.createElement("tr", {
+    key: i
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, i + 1)), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, "Q", d.q), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, d.plays), /*#__PURE__*/React.createElement("td", {
+    className: "n"
+  }, d.yards), /*#__PURE__*/React.createElement("td", null, d.result || "—")))))))));
 }
 
 /* ============================ MOUNT ============================ */

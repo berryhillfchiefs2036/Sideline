@@ -2860,6 +2860,8 @@ function GameCast({ code }) {
   const [ops, setOps] = useState([]);
   const [squad, setSquadState] = useState(() => freshSquad());
   const [status, setStatus] = useState(sb ? "connecting" : "noconfig");
+  const [view, setView] = useState("cast");
+  const [sview, setSview] = useState("off");
 
   useEffect(() => {
     if (!sb) return undefined;
@@ -2913,6 +2915,12 @@ function GameCast({ code }) {
   const drives = computeDrives(game.plays);
   const lastDrive = drives.length ? drives[drives.length - 1] : null;
   const curDrive = lastDrive && lastDrive.result === "On the field" ? lastDrive : null;
+  /* Game stats tab: the same numbers the coaches see, view-only. */
+  const T = teamTotals(game.plays);
+  const margin = T.takeaways - T.giveaways;
+  const stats = useMemo(() => tally(game.plays), [game.plays]);
+  const rows = (squad.roster || []).map((p) => ({ p, s: stats[p.id] || blank() }))
+    .filter((r) => r.s.snaps > 0);
   const toGain = game.spot != null
     ? clampSpot(game.unit === "defense" ? game.spot - game.distance : game.spot + game.distance)
     : null;
@@ -2947,6 +2955,15 @@ function GameCast({ code }) {
           </div>
         </div>
 
+        <div className="stbar" style={{ marginTop: 10 }}>
+          {[["cast", "Gamecast"], ["stats", "Game stats"]].map((t) => (
+            <button key={t[0]} className={view === t[0] ? "on" : ""}
+              onClick={() => setView(t[0])}>{t[1]}</button>
+          ))}
+        </div>
+
+        {view === "cast" && (
+        <React.Fragment>
         <div className="gc-meta">
           <div><span className="eyebrow">Down</span>
             <b>{ORD[game.down]} &amp; {game.distance}</b></div>
@@ -3038,6 +3055,133 @@ function GameCast({ code }) {
           View only — you're following along live. Scores and plays appear here seconds after the
           coaches log them.
         </div>
+        </React.Fragment>
+        )}
+
+        {view === "stats" && (
+        <React.Fragment>
+        <div className="board" style={{ marginTop: 10, marginBottom: 10 }}>
+          <div className="board-top">
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>Rush yds</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.rush}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>Pass yds</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.pass}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>Total off.</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.rush + T.pass}</div>
+            </div>
+          </div>
+          <div className="board-top" style={{ marginTop: 8 }}>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>KO ret yds</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.kr}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>Punt ret yds</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.pr}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>Allowed</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.allowed}</div>
+            </div>
+          </div>
+          <div className="board-top" style={{ marginTop: 8 }}>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>1st downs</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.fd}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>3rd down</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{T.thirdC}/{T.thirdA}</div>
+            </div>
+            <div className="score-blk">
+              <div className="eyebrow" style={{ color: "#8FA394" }}>Turnovers</div>
+              <div className="score-num" style={{ fontSize: 28 }}>{(margin > 0 ? "+" : "") + margin}</div>
+            </div>
+          </div>
+        </div>
+        <div className="stbar">
+          {[["off", "Offense"], ["def", "Defense"], ["st", "Special"], ["drv", "Drives"]].map((v) => (
+            <button key={v[0]} className={sview === v[0] ? "on" : ""}
+              onClick={() => setSview(v[0])}>{v[1]}</button>
+          ))}
+        </div>
+
+        {sview !== "drv" && rows.length === 0 && (
+          <div className="empty-note">Player stats fill in as the coaches log plays.</div>
+        )}
+        {sview === "off" && rows.length > 0 && (
+          <table>
+            <thead><tr><th>Player</th><th>Car</th><th>Rush</th><th>Rec</th><th>Yds</th><th>Pass</th><th>PsYd</th><th>Fum</th><th>TD</th></tr></thead>
+            <tbody>
+              {rows.slice().sort((a, b) => (b.s.rushY + b.s.recY) - (a.s.rushY + a.s.recY)).map(({ p, s }) => (
+                <tr key={p.id}>
+                  <td><b>#{p.num}</b> {p.name}</td>
+                  <td className="n">{s.rush}</td><td className="n">{s.rushY}</td>
+                  <td className="n">{s.rec}</td><td className="n">{s.recY}</td>
+                  <td className="n">{s.att ? s.cmp + "/" + s.att : "—"}</td>
+                  <td className="n">{s.passY}</td><td className="n">{s.fum}</td><td className="n">{s.td}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {sview === "def" && rows.length > 0 && (
+          <table>
+            <thead><tr><th>Player</th><th>Tkl</th><th>Ast</th><th>TFL</th><th>Sck</th><th>LsYd</th><th>Int</th><th>FR</th><th>PBU</th></tr></thead>
+            <tbody>
+              {rows.slice().sort((a, b) => b.s.tk - a.s.tk).map(({ p, s }) => (
+                <tr key={p.id}>
+                  <td><b>#{p.num}</b> {p.name}</td>
+                  <td className="n">{s.tk}</td><td className="n">{s.ast}</td><td className="n">{s.tfl}</td>
+                  <td className="n">{s.sack}</td><td className="n">{s.lossY}</td>
+                  <td className="n">{s.int}</td><td className="n">{s.fr}</td><td className="n">{s.pbu}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {sview === "st" && rows.length > 0 && (
+          <table>
+            <thead><tr><th>Player</th><th>Kicks</th><th>KYds</th><th>Ret</th><th>RYds</th><th>FG</th><th>Conv</th><th>Blk</th></tr></thead>
+            <tbody>
+              {rows.slice().sort((a, b) => (b.s.kickY + b.s.retY) - (a.s.kickY + a.s.retY)).map(({ p, s }) => (
+                <tr key={p.id}>
+                  <td><b>#{p.num}</b> {p.name}</td>
+                  <td className="n">{s.kicks}</td><td className="n">{s.kickY}</td>
+                  <td className="n">{s.ret}</td><td className="n">{s.retY}</td>
+                  <td className="n">{s.fga ? s.fgm + "/" + s.fga : "—"}</td>
+                  <td className="n">{s.convA ? s.convM + "/" + s.convA : "—"}</td>
+                  <td className="n">{s.blk}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {sview === "drv" && (
+          drives.length === 0 ? (
+            <div className="empty-note">Drives show up once the offense takes the field.</div>
+          ) : (
+            <table>
+              <thead><tr><th>#</th><th>Qtr</th><th>Plays</th><th>Yds</th><th>Result</th></tr></thead>
+              <tbody>
+                {drives.map((d, i) => (
+                  <tr key={i}>
+                    <td><b>{i + 1}</b></td>
+                    <td className="n">Q{d.q}</td><td className="n">{d.plays}</td><td className="n">{d.yards}</td>
+                    <td>{d.result || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+        )}
+        </React.Fragment>
+        )}
       </div>
     </div>
   );
