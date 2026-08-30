@@ -429,6 +429,41 @@ const type = (el, val) => {
   click(byText(".nav button", "Game"));
   await flush();
 
+  console.log("\ntackle for loss and team totals");
+  click(byText(".unit", "Defense"));
+  await flush();
+  click($$(".pcard.empty")[0].querySelector(".pc-top"));
+  await flush();
+  click($$(".sheet .row").find((r) => r.textContent.indexOf("Ray") >= 0));
+  await flush();
+  const rayCard = $$(".pcard").find((c) => c.textContent.indexOf("Ray") >= 0);
+  click(rayCard.querySelector(".pc-top"));
+  await flush();
+  ok("tackle for loss is an option", !!byText(".opt", "Tackle for loss"));
+  click(byText(".opt", "Tackle for loss"));
+  await flush();
+  const tflSel = $(".yardbox select");
+  ok("yards-lost picker appears for TFL", !!tflSel && tflSel.options[0].textContent.indexOf("lost") >= 0);
+  sSetter.call(tflSel, "4");
+  tflSel.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Log the play"));
+  await flush();
+  ok("TFL backed the opponent up to 2nd & 24",
+    $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("2nd & 24") >= 0);
+  click(byText(".nav button", "Stats"));
+  await flush();
+  const totNums = $$(".score-num").map((e) => e.textContent);
+  ok("team totals show rushing, passing, and total offense",
+    totNums[0] === "0" && totNums[1] === "15" && totNums[2] === "15");
+  click(byText(".stbar button", "Defense"));
+  await flush();
+  const rayRow = $$("tbody tr").find((r) => r.textContent.indexOf("Ray") >= 0);
+  ok("TFL and loss yards credited", rayRow &&
+    rayRow.querySelectorAll("td")[3].textContent === "1" && rayRow.querySelectorAll("td")[5].textContent === "4");
+  click(byText(".nav button", "Game"));
+  await flush();
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);
