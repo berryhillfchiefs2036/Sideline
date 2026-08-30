@@ -146,6 +146,9 @@ function fold(ops) {
       g.swaps[o.unit][k] = Object.assign({}, g.swaps[o.unit][k] || {}, { [o.slotId]: o.playerId });
       return;
     }
+    /* A play amended with an explicit quarter marks where that quarter
+       really started: the clock moves there and every later play restamps. */
+    if (o.quarter) g.quarter = o.quarter;
     if (o.type === "pen") {
       /* Flags land in the log with the situation they were thrown at, then
          walk the distance off: against the ball side backs the offense up
@@ -1133,6 +1136,7 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
   const [kind, setKind] = useState(play.kind || "other");
   const [side, setSide] = useState(play.side || "offense");
   const [who, setWho] = useState(isPen ? (play.playerId ? play.playerId : play.ours ? "us" : "them") : "them");
+  const [qtr, setQtr] = useState(String(play.quarter || 1));
   const actList = (play.unit === "offense" ? OFF_ACTIONS : play.unit === "defense" ? DEF_ACTIONS : ST_ACTIONS)
     .concat([{ key: "team", label: "Snap, no stat" },
       { key: "stopconv", label: "Stopped their try" }, { key: "block", label: "Blocked the kick" }]);
@@ -1140,22 +1144,26 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
   const isPass = play.unit === "offense" && (action === "catch" || action === "incomplete");
 
   const save = () => {
+    /* Only pin the quarter when the coach changed it, so plays keep
+       reflowing with upstream quarter fixes otherwise. */
+    const qPatch = parseInt(qtr, 10) !== play.quarter ? { quarter: parseInt(qtr, 10) } : {};
     if (isPen) {
-      onSave({ playerId: who !== "them" && who !== "us" ? who : null, ours: who !== "them",
-        kind, side, yards: parseInt(yards, 10) || 0 });
+      onSave(Object.assign({ playerId: who !== "them" && who !== "us" ? who : null, ours: who !== "them",
+        kind, side, yards: parseInt(yards, 10) || 0 }, qPatch));
     } else if (isThem) {
       if (score === "punt") {
-        onSave({ score: null, action: "punt", pts: null, yards: parseInt(yards, 10) || 0 });
+        onSave(Object.assign({ score: null, action: "punt", pts: null,
+          yards: parseInt(yards, 10) || 0 }, qPatch));
       } else {
-        onSave({ score, action: null, pts: ((scores.find((x) => x.key === score)) || {}).pts || 0,
-          yards: score === "td" ? parseInt(yards, 10) || 0 : 0 });
+        onSave(Object.assign({ score, action: null, pts: ((scores.find((x) => x.key === score)) || {}).pts || 0,
+          yards: score === "td" ? parseInt(yards, 10) || 0 : 0 }, qPatch));
       }
     } else {
-      onSave({ playerId: playerId || null, action: action || null,
+      onSave(Object.assign({ playerId: playerId || null, action: action || null,
         yards: isLoss ? Math.abs(parseInt(yards, 10) || 0) : parseInt(yards, 10) || 0,
         score: score !== "none" ? score : null,
         pts: score !== "none" ? ((scores.find((x) => x.key === score)) || {}).pts || 0 : null,
-        passerId: isPass ? passerId || null : null });
+        passerId: isPass ? passerId || null : null }, qPatch));
     }
   };
 
@@ -1169,6 +1177,14 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
           </div>
           <button className="close" onClick={onClose}>Cancel</button>
         </div>
+
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Quarter</div>
+        <select className="inp" aria-label="Quarter" value={qtr} onChange={(e) => setQtr(e.target.value)}>
+          {[1, 2, 3, 4].map((q) => (
+            <option key={q} value={q}>Quarter {q}{q !== play.quarter ? "" : " (as logged)"}</option>
+          ))}
+        </select>
+        <div style={{ height: 12 }} />
 
         {isPen && (
           <React.Fragment>

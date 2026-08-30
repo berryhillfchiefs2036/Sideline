@@ -720,6 +720,19 @@ const type = (el, val) => {
   click(byText(".close", "Done"));
   await flush();
 
+  console.log("\nfix a quarter after the fact");
+  click($(".logline [aria-label='Edit this play']"));
+  await flush();
+  const qFix = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Quarter");
+  ok("edit sheet offers the quarter, prefilled", !!qFix && qFix.value === "1");
+  sSetter.call(qFix, "2");
+  qFix.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await flush();
+  click(byText(".confirm", "Save the fix"));
+  await flush();
+  ok("quarter boundary appears at the corrected play", !!byText(".logline + .eyebrow, .eyebrow", "Quarter 1") ||
+    $$(".eyebrow").some((e) => e.textContent.trim() === "Quarter 1"));
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);
