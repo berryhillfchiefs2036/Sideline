@@ -131,16 +131,17 @@ function fold(ops) {
        amends layer over earlier ones in time order. */
     if (o.type === "amend" && o.target) amends[o.target] = Object.assign({}, amends[o.target], o.patch);
   });
-  let live = ops.filter((o) => o.type !== "undo" && o.type !== "amend" && !revoked.has(o.id));
+  let live = ops.filter((o) => o.type !== "undo" && o.type !== "amend" && !revoked.has(o.id))
+    .map((o) => (amends[o.id]
+      ? Object.assign({}, o, amends[o.id], { id: o.id, qMark: !!amends[o.id].quarter })
+      : o));
+  /* Amends can move a play's timestamp, so order by effective time. */
+  live.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
   const lastReset = live.map((o) => o.type).lastIndexOf("reset");
   if (lastReset >= 0) live = live.slice(lastReset + 1);
 
   const g = BASE();
   live.forEach((o) => {
-    /* qMark: this play carries an explicit "the quarter is N here" mark
-       (an amend). Marks can be cleared by amending quarter back to null. */
-    const qMarked = !!(amends[o.id] && amends[o.id].quarter);
-    if (amends[o.id]) o = Object.assign({}, o, amends[o.id]);
     if (o.type === "set") { g[o.field] = o.value; return; }
     if (o.type === "adj") { g[o.team] = Math.max(0, g[o.team] + o.delta); return; }
     if (o.type === "sub") {
@@ -158,7 +159,7 @@ function fold(ops) {
          (replay the down); against the defense moves the chains, with an
          automatic first down when the yardage covers the distance. Manual
          down/distance taps still override, as always. */
-      g.plays.push(Object.assign({}, o, { down: g.down, distance: g.distance, quarter: g.quarter, qMark: qMarked }));
+      g.plays.push(Object.assign({}, o, { down: g.down, distance: g.distance, quarter: g.quarter, qMark: !!o.qMark }));
       if (g.spot != null) {
         /* Move the mark with the walk-off, relative to which way the drive
            is going (defense unit = the other team is driving at our goal).
@@ -179,7 +180,7 @@ function fold(ops) {
 
     const sc = SCORES.find((x) => x.key === o.score);
     const pts = o.pts != null ? o.pts : sc ? sc.pts : 0;
-    g.plays.push(Object.assign({}, o, { down: g.down, distance: g.distance, quarter: g.quarter, qMark: qMarked }));
+    g.plays.push(Object.assign({}, o, { down: g.down, distance: g.distance, quarter: g.quarter, qMark: !!o.qMark }));
     /* Drive gain from this play: offense logs our gain directly; defense logs
        the OTHER team's gain (sack/TFL yards are entered as yards lost, so
        they count negative); special teams move the ball by the kick/return. */
@@ -239,6 +240,8 @@ function tally(plays) {
       q.att++;
       if (p.action === "catch") { q.cmp++; q.passY += p.yards || 0; }
     }
+    /* Teammates in on the same tackle get their assists on this play. */
+    (p.assistIds || []).forEach((id) => { g(id).ast++; });
     if (!p.playerId) return;
     const s = g(p.playerId), y = p.yards || 0;
     if (p.action === "rush") { s.rush++; s.rushY += y; }
@@ -575,6 +578,7 @@ function Sideline() {
      the unit their coach was viewing when logging. */
   const [unit, setUnit] = useState("offense");
   const [stKey, setStKey] = useState("kickoff");
+  const [movingPlay, setMovingPlay] = useState(null);
 
   const game = useMemo(() => fold(allOps), [allOps]);
   const stats = useMemo(() => tally(game.plays), [game.plays]);
@@ -601,9 +605,10 @@ function Sideline() {
     putIn(slot.id, playerId, group);
   };
   const scores = scoresFor(squad.scoring || "elementary");
-  const logPlay = ({ playerId, action, yards, score, passerId, scorePts }) => {
+  const logPlay = ({ playerId, action, yards, score, passerId, scorePts, assistIds }) => {
     addOp({ type: "play", unit, stKey: unit === "special" ? stKey : null,
       playerId: playerId || null, action: action || null, yards: yards || 0, passerId: passerId || null,
+      assistIds: assistIds && assistIds.length ? assistIds : null,
       score: score && score !== "none" ? score : null,
       pts: score && score !== "none" ? scorePts || 0 : null, snaps: fieldIds });
     setSheet(null);
@@ -656,6 +661,25 @@ function Sideline() {
     setTab("game");
   };
 
+  /* Reorder a play: re-timestamp it to sit right after the tapped target. */
+  const placeAfter = (targetId) => {
+    if (!movingPlay || movingPlay === targetId) { setMovingPlay(null); return; }
+    const seq = game.plays;
+    const i = seq.findIndex((p) => p.id === targetId);
+    if (i < 0) { setMovingPlay(null); return; }
+    const cur = seq[i].ts || Date.now();
+    const next = i + 1 < seq.length ? seq[i + 1].ts || Date.now() : Date.now();
+    addOp({ type: "amend", target: movingPlay, patch: { ts: next > cur ? (cur + next) / 2 : cur + 0.001 } });
+    setMovingPlay(null);
+  };
+  const placeFirst = () => {
+    const first = game.plays[0];
+    if (movingPlay && first && first.id !== movingPlay) {
+      addOp({ type: "amend", target: movingPlay, patch: { ts: (first.ts || Date.now()) - 1 } });
+    }
+    setMovingPlay(null);
+  };
+
   const lastUndoable = game.live.slice().reverse().find((o) => ["play", "pen", "sub", "adj", "set"].indexOf(o.type) >= 0);
   const undo = () => {
     if (!lastUndoable) return;
@@ -682,7 +706,7 @@ function Sideline() {
 
         {tab === "game" && <GameTab {...{ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay,
           undo, canUndo: !!lastUndoable, roster, moving, setMoving, assign, onEndGame: endGame,
-          unit, stKey, setUnit, setStKey }} />}
+          unit, stKey, setUnit, setStKey, movingPlay, setMovingPlay, placeAfter, placeFirst }} />}
         {tab === "roster" && <RosterTab squad={squad} setSquad={setSquad} statOf={statOf} />}
         {tab === "lineups" && <LineupsTab squad={squad} setSquad={setSquad} />}
         {tab === "stats" && <StatsTab {...{ roster, statOf, minPlays, game }} onEndGame={endGame} />}
@@ -758,7 +782,7 @@ function Sideline() {
 
 /* ============================ GAME TAB ============================ */
 
-function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay, undo, canUndo, roster, moving, setMoving, assign, onEndGame, unit, stKey, setUnit, setStKey }) {
+function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPlay, undo, canUndo, roster, moving, setMoving, assign, onEndGame, unit, stKey, setUnit, setStKey, movingPlay, setMovingPlay, placeAfter, placeFirst }) {
   const set = (field, value) => addOp({ type: "set", field, value });
   const filled = onField.filter((s) => s.playerId).length;
   const movingSlot = moving ? onField.find((s) => s.id === moving) : null;
@@ -899,7 +923,12 @@ function GameTab({ game, addOp, onField, byId, statOf, minPlays, setSheet, logPl
 
       <PlayLog game={game} byId={byId} addOp={addOp}
         onEdit={(p) => setSheet({ type: "editplay", play: p })}
-        onInsert={(p) => setSheet({ type: "insertplay", after: p })} />
+        onInsert={(p) => setSheet({ type: "insertplay", after: p })}
+        movingPlay={movingPlay}
+        onMove={(p) => setMovingPlay(p.id)}
+        onPlace={(p) => placeAfter(p.id)}
+        onPlaceFirst={placeFirst}
+        onCancelMove={() => setMovingPlay(null)} />
       {game.plays.length > 0 && (
         <button className="abtn" style={{ width: "100%", marginTop: 12 }} onClick={onEndGame}>
           End game — save it to the Season</button>
@@ -921,15 +950,31 @@ function Chain({ count, min }) {
   );
 }
 
-function PlayLog({ game, byId, addOp, onEdit, onInsert }) {
+function PlayLog({ game, byId, addOp, onEdit, onInsert, movingPlay, onMove, onPlace, onPlaceFirst, onCancelMove }) {
   const [showAll, setShowAll] = useState(false);
   const all = game.plays.slice().reverse();
   const recent = showAll ? all : all.slice(0, 14);
   if (!all.length) return null;
+  const lineProps = (p) => ({
+    className: "logline",
+    style: movingPlay === p.id ? { background: "#FBF3E3" } : null,
+    onClick: movingPlay ? (e) => {
+      if (e.target && e.target.closest && e.target.closest(".mini")) return;
+      onPlace(p);
+    } : undefined,
+  });
   return (
     <React.Fragment>
       <div className="sechd"><div className="h2">Play log</div>
         <div className="eyebrow">{showAll ? all.length + " this game · latest first" : "Latest first"}</div></div>
+      {movingPlay && (
+        <div className="banner">
+          <b>Moving a play.</b>
+          <span style={{ color: "var(--soft)" }}>Tap the play it should come right after.</span>
+          <button className="mini" onClick={onPlaceFirst}>Make it the first play</button>
+          <button className="mini" style={{ marginLeft: "auto" }} onClick={onCancelMove}>Cancel</button>
+        </div>
+      )}
       <div>
         {recent.map((p, i) => {
           const qBreak = i > 0 && recent[i - 1].quarter !== p.quarter
@@ -940,7 +985,7 @@ function PlayLog({ game, byId, addOp, onEdit, onInsert }) {
             return (
               <React.Fragment key={p.id}>
               {qBreak}
-              <div className="logline">
+              <div {...lineProps(p)}>
                 <span className="eyebrow">{ORD[p.down]} &amp; {p.distance}</span>
                 <span>
                   <b style={{ color: "var(--stop)" }}>Flag</b>{" "}
@@ -948,6 +993,8 @@ function PlayLog({ game, byId, addOp, onEdit, onInsert }) {
                   {" — "}{pk ? pk.label : "penalty"}, {p.yards} yd
                 </span>
                 <span className="who">{p.byName || ""}</span>
+                <button className="mini" style={{ flex: "0 0 auto", padding: "2px 8px" }}
+                  aria-label="Move this play in the sequence" onClick={() => onMove(p)}>↕</button>
                 <button className="mini" style={{ flex: "0 0 auto", padding: "2px 8px" }}
                   aria-label="Add a missed play after this one" onClick={() => onInsert(p)}>＋</button>
                 <button className="mini" style={{ flex: "0 0 auto", padding: "2px 8px" }}
@@ -966,7 +1013,7 @@ function PlayLog({ game, byId, addOp, onEdit, onInsert }) {
           return (
             <React.Fragment key={p.id}>
             {qBreak}
-            <div className="logline">
+            <div {...lineProps(p)}>
               <span className="eyebrow">{ORD[p.down]} &amp; {p.distance}</span>
               <span>
                 {pl ? <b>#{pl.num} {pl.name}</b> : <b>{p.them ? "Their team" : "Whole unit"}</b>}{" "}
@@ -975,9 +1022,13 @@ function PlayLog({ game, byId, addOp, onEdit, onInsert }) {
                 {["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : ""}
                 {["sack", "tfl"].indexOf(p.action) >= 0 && p.yards ? "−" + p.yards + " yd" : ""}
                 {p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : ""}
+                {p.assistIds && p.assistIds.length
+                  ? " · assist " + p.assistIds.map((id) => (byId[id] ? "#" + byId[id].num : "")).join(", ") : ""}
                 {sc && <span style={{ color: "var(--stop)", fontWeight: 700 }}> · {sc.label}</span>}
               </span>
               <span className="who">{p.byName || ""}</span>
+              <button className="mini" style={{ flex: "0 0 auto", padding: "2px 8px" }}
+                aria-label="Move this play in the sequence" onClick={() => onMove(p)}>↕</button>
               <button className="mini" style={{ flex: "0 0 auto", padding: "2px 8px" }}
                 aria-label="Add a missed play after this one" onClick={() => onInsert(p)}>＋</button>
               <button className="mini" style={{ flex: "0 0 auto", padding: "2px 8px" }}
@@ -1014,6 +1065,7 @@ function PlaySheet({ slot, player, unit, onField, byId, scores, onClose, onLog }
   const qbSlot = (onField || []).find((s) => s.playerId && s.playerId !== (player && player.id) &&
     (s.label || "").toUpperCase().indexOf("QB") >= 0);
   const [passerId, setPasserId] = useState(qbSlot ? qbSlot.playerId : "");
+  const [assistIds, setAssistIds] = useState([]);
   /* Defensive tackles/assists log the OTHER team's gain (or loss, negative)
      so the game tracks yards allowed; sacks and TFLs ask for yards lost. */
   const isDefGain = unit === "defense" && (action === "tackle" || action === "assist");
@@ -1021,6 +1073,7 @@ function PlaySheet({ slot, player, unit, onField, byId, scores, onClose, onLog }
     || isDefGain;
   const isPassPlay = unit === "offense" && (action === "catch" || action === "incomplete");
   const isLossPlay = action === "sack" || action === "tfl";
+  const isTackleLike = ["tackle", "tfl", "sack"].indexOf(action) >= 0;
   if (!player) return null;
   const yardFace = isLossPlay ? (yards ? "−" + Math.abs(yards) : "0")
     : (yards > 0 ? "+" + yards : String(yards));
@@ -1074,6 +1127,23 @@ function PlaySheet({ slot, player, unit, onField, byId, scores, onClose, onLog }
             </select>
           </React.Fragment>
         )}
+        {isTackleLike && (
+          <React.Fragment>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>
+              Assisted by — tap everyone in on it</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {(onField || []).filter((s) => s.playerId && s.playerId !== player.id).map((s) => {
+                const on = assistIds.indexOf(s.playerId) >= 0;
+                return (
+                  <button key={s.id} className={"mini" + (on ? " dark" : "")}
+                    onClick={() => setAssistIds(on
+                      ? assistIds.filter((x) => x !== s.playerId) : assistIds.concat([s.playerId]))}>
+                    #{byId[s.playerId].num} {byId[s.playerId].name}</button>
+                );
+              })}
+            </div>
+          </React.Fragment>
+        )}
         <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Points on the play</div>
         <div className="opts">
           {(scores || SCORES).map((s) => (
@@ -1085,7 +1155,8 @@ function PlaySheet({ slot, player, unit, onField, byId, scores, onClose, onLog }
         <button className="confirm"
           onClick={() => onLog({ playerId: player.id, action, yards: needsYards ? (isLossPlay ? Math.abs(yards) : yards) : 0, score,
             scorePts: (((scores || SCORES).find((x) => x.key === score)) || {}).pts || 0,
-            passerId: isPassPlay ? passerId || null : null })}>
+            passerId: isPassPlay ? passerId || null : null,
+            assistIds: isTackleLike ? assistIds : null })}>
           Log the play</button>
       </div>
     </div>
@@ -1168,6 +1239,18 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
   const [side, setSide] = useState(play.side || "offense");
   const [who, setWho] = useState(isPen ? (play.playerId ? play.playerId : play.ours ? "us" : "them") : "them");
   const [qtr, setQtr] = useState(play.qMark ? String(play.quarter) : "auto");
+  /* Who was on the field for this play — drives everyone's play counts. */
+  const [snapsSel, setSnapsSel] = useState((play.snaps || []).slice());
+  const [assistIds, setAssistIds] = useState((play.assistIds || []).slice());
+  const toggleSnap = (id) => setSnapsSel(snapsSel.indexOf(id) >= 0
+    ? snapsSel.filter((x) => x !== id) : snapsSel.concat([id]));
+  const withCredit = (list) => {
+    const base = [];
+    if (!isThem && playerId) base.push(playerId);
+    if (isPass && passerId) base.push(passerId);
+    if (isTackleLike) assistIds.forEach((id) => { if (base.indexOf(id) < 0) base.push(id); });
+    return base.concat(list.filter((id) => base.indexOf(id) < 0));
+  };
   const actList = (play.unit === "offense" ? OFF_ACTIONS : play.unit === "defense" ? DEF_ACTIONS : ST_ACTIONS)
     .concat([{ key: "team", label: "Snap, no stat" },
       { key: "stopconv", label: "Stopped their try" }, { key: "block", label: "Blocked the kick" },
@@ -1175,6 +1258,7 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
   const isLoss = action === "sack" || action === "tfl";
   const isPass = play.unit === "offense" && (action === "catch" || action === "incomplete");
   const isTheirPunt = action === "theirpunt";
+  const isTackleLike = ["tackle", "tfl", "sack"].indexOf(action) >= 0;
 
   const save = () => {
     /* "auto" = no mark on this play (clearing one if present); a number
@@ -1188,20 +1272,22 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
     } else if (isThem) {
       if (score === "punt") {
         onSave(Object.assign({ score: null, action: "punt", pts: null,
-          yards: parseInt(yards, 10) || 0 }, qPatch));
+          yards: parseInt(yards, 10) || 0, snaps: snapsSel }, qPatch));
       } else {
         onSave(Object.assign({ score, action: null, pts: ((scores.find((x) => x.key === score)) || {}).pts || 0,
-          yards: score === "td" ? parseInt(yards, 10) || 0 : 0 }, qPatch));
+          yards: score === "td" ? parseInt(yards, 10) || 0 : 0, snaps: snapsSel }, qPatch));
       }
     } else if (isTheirPunt) {
       onSave(Object.assign({ them: true, action: "punt", playerId: null, passerId: null,
-        score: null, pts: null, yards: Math.abs(parseInt(yards, 10) || 0) }, qPatch));
+        score: null, pts: null, yards: Math.abs(parseInt(yards, 10) || 0), snaps: snapsSel }, qPatch));
     } else {
       onSave(Object.assign({ playerId: playerId || null, action: action || null, them: null,
         yards: isLoss ? Math.abs(parseInt(yards, 10) || 0) : parseInt(yards, 10) || 0,
         score: score !== "none" ? score : null,
         pts: score !== "none" ? ((scores.find((x) => x.key === score)) || {}).pts || 0 : null,
-        passerId: isPass ? passerId || null : null }, qPatch));
+        passerId: isPass ? passerId || null : null,
+        assistIds: isTackleLike && assistIds.length ? assistIds : null,
+        snaps: withCredit(snapsSel) }, qPatch));
     }
   };
 
@@ -1331,6 +1417,37 @@ function EditPlaySheet({ play, roster, scores, onSave, onClose }) {
           </React.Fragment>
         )}
 
+        {!isPen && !isThem && !isTheirPunt && isTackleLike && (
+          <React.Fragment>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Assisted by — tap everyone in on it</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {roster.filter((p) => p.id !== playerId).map((p) => {
+                const on = assistIds.indexOf(p.id) >= 0;
+                return (
+                  <button key={p.id} className={"mini" + (on ? " dark" : "")}
+                    onClick={() => setAssistIds(on
+                      ? assistIds.filter((x) => x !== p.id) : assistIds.concat([p.id]))}>
+                    #{p.num} {p.name}</button>
+                );
+              })}
+            </div>
+          </React.Fragment>
+        )}
+        {!isPen && (
+          <React.Fragment>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>
+              On the field for this play — {snapsSel.length} counted</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {roster.map((p) => {
+                const on = snapsSel.indexOf(p.id) >= 0;
+                return (
+                  <button key={p.id} className={"mini" + (on ? " dark" : "")} onClick={() => toggleSnap(p.id)}>
+                    #{p.num} {p.name}</button>
+                );
+              })}
+            </div>
+          </React.Fragment>
+        )}
         <button className="confirm" onClick={save}>Save the fix</button>
       </div>
     </div>
@@ -1347,6 +1464,10 @@ function InsertPlaySheet({ afterPlay, roster, scores, onSave, onClose }) {
   const [yards, setYards] = useState(0);
   const [score, setScore] = useState("none");
   const [passerId, setPasserId] = useState("");
+  const [snapsSel, setSnapsSel] = useState([]);
+  const [assistIds, setAssistIds] = useState([]);
+  const toggleSnap = (id) => setSnapsSel(snapsSel.indexOf(id) >= 0
+    ? snapsSel.filter((x) => x !== id) : snapsSel.concat([id]));
   const pickUnit = (u) => {
     setUnit(u);
     setAction(u === "defense" ? "tackle" : u === "special" ? "kick" : "rush");
@@ -1363,14 +1484,18 @@ function InsertPlaySheet({ afterPlay, roster, scores, onSave, onClose }) {
     const y = isLoss || isTheirPunt ? Math.abs(parseInt(yards, 10) || 0) : parseInt(yards, 10) || 0;
     if (isTheirPunt) {
       onSave({ unit, stKey: unit === "special" ? stKeySel : null, them: true, action: "punt",
-        playerId: null, passerId: null, score: null, pts: null, yards: y, snaps: [] });
+        playerId: null, passerId: null, score: null, pts: null, yards: y, snaps: snapsSel });
     } else {
+      const tackleLike = ["tackle", "tfl", "sack"].indexOf(action) >= 0;
+      const base = [playerId || null, isPass ? passerId || null : null].filter(Boolean)
+        .concat(tackleLike ? assistIds : []);
       onSave({ unit, stKey: unit === "special" ? stKeySel : null, them: null,
         playerId: playerId || null, action: action || null, yards: y,
         score: score !== "none" ? score : null,
         pts: score !== "none" ? ((scores.find((x) => x.key === score)) || {}).pts || 0 : null,
         passerId: isPass ? passerId || null : null,
-        snaps: [playerId || null, isPass ? passerId || null : null].filter(Boolean) });
+        assistIds: tackleLike && assistIds.length ? assistIds : null,
+        snaps: base.concat(snapsSel.filter((id) => base.indexOf(id) < 0)) });
     }
   };
 
@@ -1386,7 +1511,8 @@ function InsertPlaySheet({ afterPlay, roster, scores, onSave, onClose }) {
         </div>
         <div className="empty-note" style={{ textAlign: "left", marginBottom: 12 }}>
           Downs, score, ball spot, and stats all recompute as if it was logged in the moment. The
-          named player (and passer) get their snap; teammates' play counts aren't changed.
+          named player (and passer) get their snap automatically — tap any teammates below who
+          were also on the field so their play counts stay right.
         </div>
         <div className="eyebrow" style={{ marginBottom: 6 }}>Unit</div>
         <select className="inp" aria-label="Unit" value={unit} onChange={(e) => pickUnit(e.target.value)}>
@@ -1446,6 +1572,33 @@ function InsertPlaySheet({ afterPlay, roster, scores, onSave, onClose }) {
             </select>
           </React.Fragment>
         )}
+        {!isTheirPunt && ["tackle", "tfl", "sack"].indexOf(action) >= 0 && (
+          <React.Fragment>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>Assisted by — tap everyone in on it</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {roster.filter((p) => p.id !== playerId).map((p) => {
+                const on = assistIds.indexOf(p.id) >= 0;
+                return (
+                  <button key={p.id} className={"mini" + (on ? " dark" : "")}
+                    onClick={() => setAssistIds(on
+                      ? assistIds.filter((x) => x !== p.id) : assistIds.concat([p.id]))}>
+                    #{p.num} {p.name}</button>
+                );
+              })}
+            </div>
+          </React.Fragment>
+        )}
+        <div className="eyebrow" style={{ margin: "12px 0 6px" }}>
+          Also on the field — {snapsSel.length} tapped</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {roster.map((p) => {
+            const on = snapsSel.indexOf(p.id) >= 0;
+            return (
+              <button key={p.id} className={"mini" + (on ? " dark" : "")} onClick={() => toggleSnap(p.id)}>
+                #{p.num} {p.name}</button>
+            );
+          })}
+        </div>
         <button className="confirm" onClick={save}>Add the play</button>
       </div>
     </div>

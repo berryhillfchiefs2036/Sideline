@@ -798,6 +798,56 @@ const type = (el, val) => {
   ok("missed play slotted into the sequence", !!nicoLine && nicoLine.textContent.indexOf("ran 8 yd") >= 0);
   ok("inserted play is not the latest line", $$(".logline")[0].textContent.indexOf("Nico") < 0);
 
+  console.log("\nfix who was on the field");
+  click(byText(".logline", "Nico").querySelector("[aria-label='Edit this play']"));
+  await flush();
+  const fieldChips = $$(".sheet .mini");
+  ok("on-field chips offered in the editor", fieldChips.length >= 5);
+  ok("credited player pre-counted",
+    fieldChips.some((b) => b.className.indexOf("dark") >= 0 && b.textContent.indexOf("Nico") >= 0));
+  click(fieldChips.find((b) => b.textContent.indexOf("Sam") >= 0));
+  await flush();
+  click(byText(".confirm", "Save the fix"));
+  await flush();
+  click(byText(".logline", "Nico").querySelector("[aria-label='Edit this play']"));
+  await flush();
+  ok("added teammate's snap saved",
+    $$(".sheet .mini").some((b) => b.className.indexOf("dark") >= 0 && b.textContent.indexOf("Sam") >= 0));
+  click(byText(".close", "Cancel"));
+  await flush();
+
+  console.log("\nassists on the same play");
+  click(byText(".mini", "Show all"));
+  await flush();
+  const rayTackleLine = $$(".logline").find((l) =>
+    l.textContent.indexOf("Ray") >= 0 && l.textContent.indexOf("tackle") >= 0);
+  click(rayTackleLine.querySelector("[aria-label='Edit this play']"));
+  await flush();
+  ok("assist picker offered on a tackle", !!byText(".eyebrow", "Assisted by"));
+  click($$(".sheet .mini").find((b) => b.textContent.indexOf("Eli") >= 0));
+  await flush();
+  click(byText(".confirm", "Save the fix"));
+  await flush();
+  ok("assist shows on the play line", !!$$(".logline").find((l) =>
+    l.textContent.indexOf("Ray") >= 0 && l.textContent.indexOf("assist #44") >= 0));
+  click(byText(".nav button", "Stats"));
+  await flush();
+  click(byText(".stbar button", "Defense"));
+  await flush();
+  const eliDefRow = $$("tbody tr").find((r) => r.textContent.indexOf("Eli") >= 0);
+  ok("assist credited to the teammate", eliDefRow && eliDefRow.querySelectorAll("td")[2].textContent === "1");
+  click(byText(".nav button", "Game"));
+  await flush();
+
+  console.log("\nreorder a play");
+  ok("moved play starts away from the top", $$(".logline")[0].textContent.indexOf("Nico") < 0);
+  click(byText(".logline", "Nico").querySelector("[aria-label='Move this play in the sequence']"));
+  await flush();
+  ok("move banner shown", !!byText(".banner", "Moving a play"));
+  click($$(".logline")[0]);
+  await flush();
+  ok("play moved to its new spot in the order", $$(".logline")[0].textContent.indexOf("Nico") >= 0);
+
   console.log("\npersistence");
   ok("ops saved to localStorage", !!store["sideline.solo.ops"] && JSON.parse(store["sideline.solo.ops"]).length > 3);
   ok("roster saved to localStorage", JSON.parse(store["sideline.solo.squad"]).roster.length === 5);

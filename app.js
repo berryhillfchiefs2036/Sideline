@@ -345,15 +345,16 @@ function fold(ops) {
        amends layer over earlier ones in time order. */
     if (o.type === "amend" && o.target) amends[o.target] = Object.assign({}, amends[o.target], o.patch);
   });
-  let live = ops.filter(o => o.type !== "undo" && o.type !== "amend" && !revoked.has(o.id));
+  let live = ops.filter(o => o.type !== "undo" && o.type !== "amend" && !revoked.has(o.id)).map(o => amends[o.id] ? Object.assign({}, o, amends[o.id], {
+    id: o.id,
+    qMark: !!amends[o.id].quarter
+  }) : o);
+  /* Amends can move a play's timestamp, so order by effective time. */
+  live.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
   const lastReset = live.map(o => o.type).lastIndexOf("reset");
   if (lastReset >= 0) live = live.slice(lastReset + 1);
   const g = BASE();
   live.forEach(o => {
-    /* qMark: this play carries an explicit "the quarter is N here" mark
-       (an amend). Marks can be cleared by amending quarter back to null. */
-    const qMarked = !!(amends[o.id] && amends[o.id].quarter);
-    if (amends[o.id]) o = Object.assign({}, o, amends[o.id]);
     if (o.type === "set") {
       g[o.field] = o.value;
       return;
@@ -383,7 +384,7 @@ function fold(ops) {
         down: g.down,
         distance: g.distance,
         quarter: g.quarter,
-        qMark: qMarked
+        qMark: !!o.qMark
       }));
       if (g.spot != null) {
         /* Move the mark with the walk-off, relative to which way the drive
@@ -411,7 +412,7 @@ function fold(ops) {
       down: g.down,
       distance: g.distance,
       quarter: g.quarter,
-      qMark: qMarked
+      qMark: !!o.qMark
     }));
     /* Drive gain from this play: offense logs our gain directly; defense logs
        the OTHER team's gain (sack/TFL yards are entered as yards lost, so
@@ -520,6 +521,10 @@ function tally(plays) {
         q.passY += p.yards || 0;
       }
     }
+    /* Teammates in on the same tackle get their assists on this play. */
+    (p.assistIds || []).forEach(id => {
+      g(id).ast++;
+    });
     if (!p.playerId) return;
     const s = g(p.playerId),
       y = p.yards || 0;
@@ -1046,6 +1051,7 @@ function Sideline() {
      the unit their coach was viewing when logging. */
   const [unit, setUnit] = useState("offense");
   const [stKey, setStKey] = useState("kickoff");
+  const [movingPlay, setMovingPlay] = useState(null);
   const game = useMemo(() => fold(allOps), [allOps]);
   const stats = useMemo(() => tally(game.plays), [game.plays]);
   const statOf = id => stats[id] || blank();
@@ -1091,7 +1097,8 @@ function Sideline() {
     yards,
     score,
     passerId,
-    scorePts
+    scorePts,
+    assistIds
   }) => {
     addOp({
       type: "play",
@@ -1101,6 +1108,7 @@ function Sideline() {
       action: action || null,
       yards: yards || 0,
       passerId: passerId || null,
+      assistIds: assistIds && assistIds.length ? assistIds : null,
       score: score && score !== "none" ? score : null,
       pts: score && score !== "none" ? scorePts || 0 : null,
       snaps: fieldIds
@@ -1170,6 +1178,43 @@ function Sideline() {
     });
     setTab("game");
   };
+
+  /* Reorder a play: re-timestamp it to sit right after the tapped target. */
+  const placeAfter = targetId => {
+    if (!movingPlay || movingPlay === targetId) {
+      setMovingPlay(null);
+      return;
+    }
+    const seq = game.plays;
+    const i = seq.findIndex(p => p.id === targetId);
+    if (i < 0) {
+      setMovingPlay(null);
+      return;
+    }
+    const cur = seq[i].ts || Date.now();
+    const next = i + 1 < seq.length ? seq[i + 1].ts || Date.now() : Date.now();
+    addOp({
+      type: "amend",
+      target: movingPlay,
+      patch: {
+        ts: next > cur ? (cur + next) / 2 : cur + 0.001
+      }
+    });
+    setMovingPlay(null);
+  };
+  const placeFirst = () => {
+    const first = game.plays[0];
+    if (movingPlay && first && first.id !== movingPlay) {
+      addOp({
+        type: "amend",
+        target: movingPlay,
+        patch: {
+          ts: (first.ts || Date.now()) - 1
+        }
+      });
+    }
+    setMovingPlay(null);
+  };
   const lastUndoable = game.live.slice().reverse().find(o => ["play", "pen", "sub", "adj", "set"].indexOf(o.type) >= 0);
   const undo = () => {
     if (!lastUndoable) return;
@@ -1220,7 +1265,11 @@ function Sideline() {
     unit,
     stKey,
     setUnit,
-    setStKey
+    setStKey,
+    movingPlay,
+    setMovingPlay,
+    placeAfter,
+    placeFirst
   }), tab === "roster" && /*#__PURE__*/React.createElement(RosterTab, {
     squad: squad,
     setSquad: setSquad,
@@ -1420,7 +1469,11 @@ function GameTab({
   unit,
   stKey,
   setUnit,
-  setStKey
+  setStKey,
+  movingPlay,
+  setMovingPlay,
+  placeAfter,
+  placeFirst
 }) {
   const set = (field, value) => addOp({
     type: "set",
@@ -1658,7 +1711,12 @@ function GameTab({
     onInsert: p => setSheet({
       type: "insertplay",
       after: p
-    })
+    }),
+    movingPlay: movingPlay,
+    onMove: p => setMovingPlay(p.id),
+    onPlace: p => placeAfter(p.id),
+    onPlaceFirst: placeFirst,
+    onCancelMove: () => setMovingPlay(null)
   }), game.plays.length > 0 && /*#__PURE__*/React.createElement("button", {
     className: "abtn",
     style: {
@@ -1694,19 +1752,49 @@ function PlayLog({
   byId,
   addOp,
   onEdit,
-  onInsert
+  onInsert,
+  movingPlay,
+  onMove,
+  onPlace,
+  onPlaceFirst,
+  onCancelMove
 }) {
   const [showAll, setShowAll] = useState(false);
   const all = game.plays.slice().reverse();
   const recent = showAll ? all : all.slice(0, 14);
   if (!all.length) return null;
+  const lineProps = p => ({
+    className: "logline",
+    style: movingPlay === p.id ? {
+      background: "#FBF3E3"
+    } : null,
+    onClick: movingPlay ? e => {
+      if (e.target && e.target.closest && e.target.closest(".mini")) return;
+      onPlace(p);
+    } : undefined
+  });
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "sechd"
   }, /*#__PURE__*/React.createElement("div", {
     className: "h2"
   }, "Play log"), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow"
-  }, showAll ? all.length + " this game · latest first" : "Latest first")), /*#__PURE__*/React.createElement("div", null, recent.map((p, i) => {
+  }, showAll ? all.length + " this game · latest first" : "Latest first")), movingPlay && /*#__PURE__*/React.createElement("div", {
+    className: "banner"
+  }, /*#__PURE__*/React.createElement("b", null, "Moving a play."), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--soft)"
+    }
+  }, "Tap the play it should come right after."), /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    onClick: onPlaceFirst
+  }, "Make it the first play"), /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    style: {
+      marginLeft: "auto"
+    },
+    onClick: onCancelMove
+  }, "Cancel")), /*#__PURE__*/React.createElement("div", null, recent.map((p, i) => {
     const qBreak = i > 0 && recent[i - 1].quarter !== p.quarter ? /*#__PURE__*/React.createElement("div", {
       className: "eyebrow",
       style: {
@@ -1718,9 +1806,7 @@ function PlayLog({
       const pk = PENALTIES.find(x => x.key === p.kind);
       return /*#__PURE__*/React.createElement(React.Fragment, {
         key: p.id
-      }, qBreak, /*#__PURE__*/React.createElement("div", {
-        className: "logline"
-      }, /*#__PURE__*/React.createElement("span", {
+      }, qBreak, /*#__PURE__*/React.createElement("div", lineProps(p), /*#__PURE__*/React.createElement("span", {
         className: "eyebrow"
       }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("b", {
         style: {
@@ -1729,6 +1815,14 @@ function PlayLog({
       }, "Flag"), " ", pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : p.ours ? "on us" : "on them", " — ", pk ? pk.label : "penalty", ", ", p.yards, " yd"), /*#__PURE__*/React.createElement("span", {
         className: "who"
       }, p.byName || ""), /*#__PURE__*/React.createElement("button", {
+        className: "mini",
+        style: {
+          flex: "0 0 auto",
+          padding: "2px 8px"
+        },
+        "aria-label": "Move this play in the sequence",
+        onClick: () => onMove(p)
+      }, "\u2195"), /*#__PURE__*/React.createElement("button", {
         className: "mini",
         style: {
           flex: "0 0 auto",
@@ -1764,11 +1858,9 @@ function PlayLog({
     const sc = SCORES.find(x => x.key === p.score);
     return /*#__PURE__*/React.createElement(React.Fragment, {
       key: p.id
-    }, qBreak, /*#__PURE__*/React.createElement("div", {
-      className: "logline"
-    }, /*#__PURE__*/React.createElement("span", {
+    }, qBreak, /*#__PURE__*/React.createElement("div", lineProps(p), /*#__PURE__*/React.createElement("span", {
       className: "eyebrow"
-    }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : /*#__PURE__*/React.createElement("b", null, p.them ? "Their team" : "Whole unit"), " ", p.them && p.yards ? p.yards + " yd " : "", VERB[p.action] || "", " ", ["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : "", ["sack", "tfl"].indexOf(p.action) >= 0 && p.yards ? "−" + p.yards + " yd" : "", p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : "", sc && /*#__PURE__*/React.createElement("span", {
+    }, ORD[p.down], " & ", p.distance), /*#__PURE__*/React.createElement("span", null, pl ? /*#__PURE__*/React.createElement("b", null, "#", pl.num, " ", pl.name) : /*#__PURE__*/React.createElement("b", null, p.them ? "Their team" : "Whole unit"), " ", p.them && p.yards ? p.yards + " yd " : "", VERB[p.action] || "", " ", ["rush", "catch", "pass", "return", "kick", "fumkept"].indexOf(p.action) >= 0 ? p.yards + " yd" : "", ["sack", "tfl"].indexOf(p.action) >= 0 && p.yards ? "−" + p.yards + " yd" : "", p.passerId && byId[p.passerId] ? " from #" + byId[p.passerId].num : "", p.assistIds && p.assistIds.length ? " · assist " + p.assistIds.map(id => byId[id] ? "#" + byId[id].num : "").join(", ") : "", sc && /*#__PURE__*/React.createElement("span", {
       style: {
         color: "var(--stop)",
         fontWeight: 700
@@ -1776,6 +1868,14 @@ function PlayLog({
     }, " \xB7 ", sc.label)), /*#__PURE__*/React.createElement("span", {
       className: "who"
     }, p.byName || ""), /*#__PURE__*/React.createElement("button", {
+      className: "mini",
+      style: {
+        flex: "0 0 auto",
+        padding: "2px 8px"
+      },
+      "aria-label": "Move this play in the sequence",
+      onClick: () => onMove(p)
+    }, "\u2195"), /*#__PURE__*/React.createElement("button", {
       className: "mini",
       style: {
         flex: "0 0 auto",
@@ -1838,12 +1938,14 @@ function PlaySheet({
      any other on-field player for a halfback pass or similar. */
   const qbSlot = (onField || []).find(s => s.playerId && s.playerId !== (player && player.id) && (s.label || "").toUpperCase().indexOf("QB") >= 0);
   const [passerId, setPasserId] = useState(qbSlot ? qbSlot.playerId : "");
+  const [assistIds, setAssistIds] = useState([]);
   /* Defensive tackles/assists log the OTHER team's gain (or loss, negative)
      so the game tracks yards allowed; sacks and TFLs ask for yards lost. */
   const isDefGain = unit === "defense" && (action === "tackle" || action === "assist");
   const needsYards = ["rush", "catch", "pass", "return", "kick", "sack", "tfl", "fumkept"].indexOf(action) >= 0 || isDefGain;
   const isPassPlay = unit === "offense" && (action === "catch" || action === "incomplete");
   const isLossPlay = action === "sack" || action === "tfl";
+  const isTackleLike = ["tackle", "tfl", "sack"].indexOf(action) >= 0;
   if (!player) return null;
   const yardFace = isLossPlay ? yards ? "−" + Math.abs(yards) : "0" : yards > 0 ? "+" + yards : String(yards);
   const yardTone = isLossPlay ? yards ? "loss" : "zero" : isDefGain ? yards > 0 ? "loss" : yards < 0 ? "gain" : "zero" : yards > 0 ? "gain" : yards < 0 ? "loss" : "zero";
@@ -1918,7 +2020,25 @@ function PlaySheet({
   }, "No passer / not sure"), (onField || []).filter(s => s.playerId && s.playerId !== player.id).map(s => /*#__PURE__*/React.createElement("option", {
     key: s.id,
     value: s.playerId
-  }, "#", byId[s.playerId].num, " ", byId[s.playerId].name, " (", s.label, ")")))), /*#__PURE__*/React.createElement("div", {
+  }, "#", byId[s.playerId].num, " ", byId[s.playerId].name, " (", s.label, ")")))), isTackleLike && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "Assisted by \u2014 tap everyone in on it"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 6
+    }
+  }, (onField || []).filter(s => s.playerId && s.playerId !== player.id).map(s => {
+    const on = assistIds.indexOf(s.playerId) >= 0;
+    return /*#__PURE__*/React.createElement("button", {
+      key: s.id,
+      className: "mini" + (on ? " dark" : ""),
+      onClick: () => setAssistIds(on ? assistIds.filter(x => x !== s.playerId) : assistIds.concat([s.playerId]))
+    }, "#", byId[s.playerId].num, " ", byId[s.playerId].name);
+  }))), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       margin: "12px 0 6px"
@@ -1941,7 +2061,8 @@ function PlaySheet({
       yards: needsYards ? isLossPlay ? Math.abs(yards) : yards : 0,
       score,
       scorePts: ((scores || SCORES).find(x => x.key === score) || {}).pts || 0,
-      passerId: isPassPlay ? passerId || null : null
+      passerId: isPassPlay ? passerId || null : null,
+      assistIds: isTackleLike ? assistIds : null
     })
   }, "Log the play")));
 }
@@ -2085,6 +2206,19 @@ function EditPlaySheet({
   const [side, setSide] = useState(play.side || "offense");
   const [who, setWho] = useState(isPen ? play.playerId ? play.playerId : play.ours ? "us" : "them" : "them");
   const [qtr, setQtr] = useState(play.qMark ? String(play.quarter) : "auto");
+  /* Who was on the field for this play — drives everyone's play counts. */
+  const [snapsSel, setSnapsSel] = useState((play.snaps || []).slice());
+  const [assistIds, setAssistIds] = useState((play.assistIds || []).slice());
+  const toggleSnap = id => setSnapsSel(snapsSel.indexOf(id) >= 0 ? snapsSel.filter(x => x !== id) : snapsSel.concat([id]));
+  const withCredit = list => {
+    const base = [];
+    if (!isThem && playerId) base.push(playerId);
+    if (isPass && passerId) base.push(passerId);
+    if (isTackleLike) assistIds.forEach(id => {
+      if (base.indexOf(id) < 0) base.push(id);
+    });
+    return base.concat(list.filter(id => base.indexOf(id) < 0));
+  };
   const actList = (play.unit === "offense" ? OFF_ACTIONS : play.unit === "defense" ? DEF_ACTIONS : ST_ACTIONS).concat([{
     key: "team",
     label: "Snap, no stat"
@@ -2101,6 +2235,7 @@ function EditPlaySheet({
   const isLoss = action === "sack" || action === "tfl";
   const isPass = play.unit === "offense" && (action === "catch" || action === "incomplete");
   const isTheirPunt = action === "theirpunt";
+  const isTackleLike = ["tackle", "tfl", "sack"].indexOf(action) >= 0;
   const save = () => {
     /* "auto" = no mark on this play (clearing one if present); a number
        marks that quarter as starting here. */
@@ -2123,14 +2258,16 @@ function EditPlaySheet({
           score: null,
           action: "punt",
           pts: null,
-          yards: parseInt(yards, 10) || 0
+          yards: parseInt(yards, 10) || 0,
+          snaps: snapsSel
         }, qPatch));
       } else {
         onSave(Object.assign({
           score,
           action: null,
           pts: (scores.find(x => x.key === score) || {}).pts || 0,
-          yards: score === "td" ? parseInt(yards, 10) || 0 : 0
+          yards: score === "td" ? parseInt(yards, 10) || 0 : 0,
+          snaps: snapsSel
         }, qPatch));
       }
     } else if (isTheirPunt) {
@@ -2141,7 +2278,8 @@ function EditPlaySheet({
         passerId: null,
         score: null,
         pts: null,
-        yards: Math.abs(parseInt(yards, 10) || 0)
+        yards: Math.abs(parseInt(yards, 10) || 0),
+        snaps: snapsSel
       }, qPatch));
     } else {
       onSave(Object.assign({
@@ -2151,7 +2289,9 @@ function EditPlaySheet({
         yards: isLoss ? Math.abs(parseInt(yards, 10) || 0) : parseInt(yards, 10) || 0,
         score: score !== "none" ? score : null,
         pts: score !== "none" ? (scores.find(x => x.key === score) || {}).pts || 0 : null,
-        passerId: isPass ? passerId || null : null
+        passerId: isPass ? passerId || null : null,
+        assistIds: isTackleLike && assistIds.length ? assistIds : null,
+        snaps: withCredit(snapsSel)
       }, qPatch));
     }
   };
@@ -2362,7 +2502,43 @@ function EditPlaySheet({
   }, scores.map(s => /*#__PURE__*/React.createElement("option", {
     key: s.key,
     value: s.key
-  }, s.label, s.pts ? " (+" + s.pts + ")" : ""))))), /*#__PURE__*/React.createElement("button", {
+  }, s.label, s.pts ? " (+" + s.pts + ")" : ""))))), !isPen && !isThem && !isTheirPunt && isTackleLike && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "Assisted by \u2014 tap everyone in on it"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 6
+    }
+  }, roster.filter(p => p.id !== playerId).map(p => {
+    const on = assistIds.indexOf(p.id) >= 0;
+    return /*#__PURE__*/React.createElement("button", {
+      key: p.id,
+      className: "mini" + (on ? " dark" : ""),
+      onClick: () => setAssistIds(on ? assistIds.filter(x => x !== p.id) : assistIds.concat([p.id]))
+    }, "#", p.num, " ", p.name);
+  }))), !isPen && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "On the field for this play \u2014 ", snapsSel.length, " counted"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 6
+    }
+  }, roster.map(p => {
+    const on = snapsSel.indexOf(p.id) >= 0;
+    return /*#__PURE__*/React.createElement("button", {
+      key: p.id,
+      className: "mini" + (on ? " dark" : ""),
+      onClick: () => toggleSnap(p.id)
+    }, "#", p.num, " ", p.name);
+  }))), /*#__PURE__*/React.createElement("button", {
     className: "confirm",
     onClick: save
   }, "Save the fix")));
@@ -2382,6 +2558,9 @@ function InsertPlaySheet({
   const [yards, setYards] = useState(0);
   const [score, setScore] = useState("none");
   const [passerId, setPasserId] = useState("");
+  const [snapsSel, setSnapsSel] = useState([]);
+  const [assistIds, setAssistIds] = useState([]);
+  const toggleSnap = id => setSnapsSel(snapsSel.indexOf(id) >= 0 ? snapsSel.filter(x => x !== id) : snapsSel.concat([id]));
   const pickUnit = u => {
     setUnit(u);
     setAction(u === "defense" ? "tackle" : u === "special" ? "kick" : "rush");
@@ -2415,9 +2594,11 @@ function InsertPlaySheet({
         score: null,
         pts: null,
         yards: y,
-        snaps: []
+        snaps: snapsSel
       });
     } else {
+      const tackleLike = ["tackle", "tfl", "sack"].indexOf(action) >= 0;
+      const base = [playerId || null, isPass ? passerId || null : null].filter(Boolean).concat(tackleLike ? assistIds : []);
       onSave({
         unit,
         stKey: unit === "special" ? stKeySel : null,
@@ -2428,7 +2609,8 @@ function InsertPlaySheet({
         score: score !== "none" ? score : null,
         pts: score !== "none" ? (scores.find(x => x.key === score) || {}).pts || 0 : null,
         passerId: isPass ? passerId || null : null,
-        snaps: [playerId || null, isPass ? passerId || null : null].filter(Boolean)
+        assistIds: tackleLike && assistIds.length ? assistIds : null,
+        snaps: base.concat(snapsSel.filter(id => base.indexOf(id) < 0))
       });
     }
   };
@@ -2453,7 +2635,7 @@ function InsertPlaySheet({
       textAlign: "left",
       marginBottom: 12
     }
-  }, "Downs, score, ball spot, and stats all recompute as if it was logged in the moment. The named player (and passer) get their snap; teammates' play counts aren't changed."), /*#__PURE__*/React.createElement("div", {
+  }, "Downs, score, ball spot, and stats all recompute as if it was logged in the moment. The named player (and passer) get their snap automatically \u2014 tap any teammates below who were also on the field so their play counts stay right."), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       marginBottom: 6
@@ -2554,7 +2736,43 @@ function InsertPlaySheet({
   }, scores.map(s => /*#__PURE__*/React.createElement("option", {
     key: s.key,
     value: s.key
-  }, s.label, s.pts ? " (+" + s.pts + ")" : "")))), /*#__PURE__*/React.createElement("button", {
+  }, s.label, s.pts ? " (+" + s.pts + ")" : "")))), !isTheirPunt && ["tackle", "tfl", "sack"].indexOf(action) >= 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "Assisted by \u2014 tap everyone in on it"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 6
+    }
+  }, roster.filter(p => p.id !== playerId).map(p => {
+    const on = assistIds.indexOf(p.id) >= 0;
+    return /*#__PURE__*/React.createElement("button", {
+      key: p.id,
+      className: "mini" + (on ? " dark" : ""),
+      onClick: () => setAssistIds(on ? assistIds.filter(x => x !== p.id) : assistIds.concat([p.id]))
+    }, "#", p.num, " ", p.name);
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "Also on the field \u2014 ", snapsSel.length, " tapped"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 6
+    }
+  }, roster.map(p => {
+    const on = snapsSel.indexOf(p.id) >= 0;
+    return /*#__PURE__*/React.createElement("button", {
+      key: p.id,
+      className: "mini" + (on ? " dark" : ""),
+      onClick: () => toggleSnap(p.id)
+    }, "#", p.num, " ", p.name);
+  })), /*#__PURE__*/React.createElement("button", {
     className: "confirm",
     onClick: save
   }, "Add the play")));
