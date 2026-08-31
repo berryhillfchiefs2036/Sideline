@@ -135,6 +135,7 @@ const endViaSheet = async (opp) => {
   await flush();
   ok("board asks which game before logging", !!byText(".abtn", "Track without a scheduled game") &&
     $$(".pcard").length === 0);
+  ok("locked board hides the score ticks too", $$(".tick").length === 0);
   click(byText(".abtn", "Track without a scheduled game"));
   await flush();
   const cards = $$(".pcard");

@@ -1375,22 +1375,32 @@ function Sideline() {
      confirmed on the End sheet — the ONLY thing that ever stamps a schedule
      row final, so a stale tag can never stamp the wrong game invisibly. */
   const archive = (opponent, when, schedId) => {
-    const players = roster.map(p => ({
-      id: p.id,
-      num: p.num,
-      name: p.name,
-      s: statOf(p.id)
-    })).filter(r => r.s.snaps > 0);
+    /* Player lines come from everyone the plays credit — not the roster — so
+       a kid removed from the roster mid-season keeps their archived stats. */
+    const players = Object.keys(stats).map(id => {
+      const p = byId[id];
+      return {
+        id,
+        num: p ? p.num : "—",
+        name: p ? p.name : "Former player",
+        s: stats[id]
+      };
+    }).filter(r => r.s.snaps > 0);
     /* Games logged after the fact get archived under the date they were
        actually played, not the date they were typed in. */
     const endedAt = /^\d{4}-\d{2}-\d{2}$/.test((when || "").trim()) ? new Date(when.trim() + "T12:00:00").toISOString() : new Date().toISOString();
     const recId = uid();
+    /* usOrig/themOrig remember the score as folded at archive time, so a
+       later manual edit to the record survives a reopen (the difference is
+       replayed on top as an adjustment). */
     S.archiveGame({
       id: recId,
       endedAt,
       opponent: opponent || "",
       us: game.us,
       them: game.them,
+      usOrig: game.us,
+      themOrig: game.them,
       playsCount: game.playCount,
       plays: game.plays,
       players,
@@ -1497,49 +1507,82 @@ function Sideline() {
       return;
     }
     if (!window.confirm("Put " + (rec.opponent ? "vs " + rec.opponent : "this game") + " (" + (rec.us || 0) + "–" + (rec.them || 0) + ", " + (rec.playsCount || 0) + " plays) back on the board? " + "Every play comes back, fully editable, and it leaves the Season list until you end the game again.")) return;
+    const tagOp = ts => ({
+      type: "set",
+      field: "gameInfo",
+      ts,
+      value: {
+        opponent: rec.opponent || "",
+        date: (rec.endedAt || "").slice(0, 10),
+        schedId: rec.schedId || null,
+        scrim: !!rec.scrim
+      }
+    });
+    /* Score differences replay as adjustments, never absolute sets — so a
+       record edited after archiving keeps its correction, AND a play added
+       later still moves the score like it should. */
+    const adjOps = (baseUs, baseThem, ts) => {
+      const dUs = (rec.us || 0) - baseUs;
+      const dThem = (rec.them || 0) - baseThem;
+      if (dUs) addOp({
+        type: "adj",
+        team: "us",
+        delta: dUs,
+        ts
+      });
+      if (dThem) addOp({
+        type: "adj",
+        team: "them",
+        delta: dThem,
+        ts: ts + 1
+      });
+    };
     if (game.lastResetId && game.lastResetRecId && rec.id === game.lastResetRecId) {
+      /* Undo the End — and revoke anything logged since it (a next-game tag,
+         score ticks, subs), so none of it leaks into the restored game. */
       addOp({
         type: "undo",
-        targets: [game.lastResetId]
+        targets: [game.lastResetId].concat(game.live.map(o => o.id))
       });
+      const after = Date.now() + 5;
+      addOp(tagOp(after));
+      adjOps(rec.usOrig != null ? rec.usOrig : rec.us || 0, rec.themOrig != null ? rec.themOrig : rec.them || 0, after + 1);
     } else {
+      /* Rebuild from the archived snapshot. Quarter fields are kept only
+         where the quarter changes (as editable marks) so a later quarter fix
+         propagates; stale down/distance/spot annotations recompute fresh. */
       const base = Date.now();
       const list = rec.plays || [];
+      let rUs = 0,
+        rThem = 0,
+        prevQ = null;
       list.forEach((p, i) => {
         const op = Object.assign({}, p);
         delete op.id;
         delete op.by;
         delete op.byName;
+        delete op.down;
+        delete op.distance;
+        delete op.spot;
+        if (op.quarter && op.quarter !== prevQ) op.qMark = true;else {
+          delete op.quarter;
+          delete op.qMark;
+        }
+        prevQ = p.quarter || prevQ;
+        if (p.type !== "pen") {
+          const pts = p.pts != null ? p.pts : (SCORES.find(x => x.key === p.score) || {}).pts || 0;
+          if (pts > 0) {
+            const ours = !p.them && (p.unit !== "defense" || p.score === "td" || p.score === "safety");
+            if (ours) rUs += pts;else rThem += pts;
+          }
+        }
         addOp(Object.assign(op, {
           ts: base + i
         }));
       });
-      /* Restore the tag and the final score exactly as archived — manual
-         score corrections in the record survive the rebuild. */
       const after = base + list.length + 500;
-      addOp({
-        type: "set",
-        field: "gameInfo",
-        ts: after,
-        value: {
-          opponent: rec.opponent || "",
-          date: (rec.endedAt || "").slice(0, 10),
-          schedId: rec.schedId || null,
-          scrim: !!rec.scrim
-        }
-      });
-      addOp({
-        type: "set",
-        field: "us",
-        value: rec.us || 0,
-        ts: after + 1
-      });
-      addOp({
-        type: "set",
-        field: "them",
-        value: rec.them || 0,
-        ts: after + 2
-      });
+      addOp(tagOp(after));
+      adjOps(rUs, rThem, after + 1);
     }
     S.removeGame(rec.id);
     setTab("game");
@@ -1551,12 +1594,15 @@ function Sideline() {
     id: "live",
     endedAt: new Date().toISOString(),
     scrim: !!(game.gameInfo || {}).scrim,
-    players: roster.map(p => ({
-      id: p.id,
-      num: p.num,
-      name: p.name,
-      s: statOf(p.id)
-    })).filter(r => r.s.snaps > 0)
+    players: Object.keys(stats).map(id => {
+      const p = byId[id];
+      return {
+        id,
+        num: p ? p.num : "—",
+        name: p ? p.name : "Former player",
+        s: stats[id]
+      };
+    }).filter(r => r.s.snaps > 0)
   } : null;
   const lastUndoable = game.live.slice().reverse().find(o => ["play", "pen", "sub", "adj", "set"].indexOf(o.type) >= 0);
   const undo = () => {
@@ -1790,6 +1836,13 @@ function Sideline() {
     schedule: squad.schedule || [],
     onClose: () => setSheet(null),
     onEnd: (opp, when, schedId) => {
+      /* If another coach already ended it while this sheet sat open,
+         archiving again would save a junk empty 0-0 game. */
+      if (game.plays.length === 0) {
+        window.alert("This game was already ended — probably by another coach. Nothing extra was saved.");
+        setSheet(null);
+        return;
+      }
       const recId = archive(opp, when, schedId);
       addOp({
         type: "reset",
@@ -1884,7 +1937,7 @@ function GameTab({
     className: "eyebrow"
   }, teamName || "Us"), /*#__PURE__*/React.createElement("div", {
     className: "score-num"
-  }, game.us), /*#__PURE__*/React.createElement("div", {
+  }, game.us), !needsGame && /*#__PURE__*/React.createElement("div", {
     className: "score-btns"
   }, /*#__PURE__*/React.createElement("button", {
     className: "tick",
@@ -1912,7 +1965,7 @@ function GameTab({
     className: "eyebrow"
   }, oppName || "Them"), /*#__PURE__*/React.createElement("div", {
     className: "score-num"
-  }, game.them), /*#__PURE__*/React.createElement("div", {
+  }, game.them), !needsGame && /*#__PURE__*/React.createElement("div", {
     className: "score-btns"
   }, /*#__PURE__*/React.createElement("button", {
     className: "tick",
@@ -1982,7 +2035,10 @@ function GameTab({
       marginLeft: 8,
       padding: "2px 8px"
     },
-    onClick: () => set("gameInfo", null)
+    onClick: () => addOp({
+      type: "undo",
+      targets: game.live.map(o => o.id)
+    })
   }, "Pick a different game")), !needsGame && /*#__PURE__*/React.createElement("div", {
     className: "units"
   }, UNITS.map(u => /*#__PURE__*/React.createElement("button", {
