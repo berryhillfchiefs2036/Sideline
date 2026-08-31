@@ -333,6 +333,9 @@ const endViaSheet = async (opp) => {
   await flush();
   const bearsPre = $$(".sheet input").find((i) => i.getAttribute("aria-label") === "Opponent");
   ok("end sheet prefills the tracked opponent", !!bearsPre && bearsPre.value === "Bears");
+  const stampSel = $$(".sheet select").find((s) => s.getAttribute("aria-label") === "Schedule game to mark final");
+  ok("end sheet shows which scheduled game gets the final",
+    !!stampSel && stampSel.options[stampSel.selectedIndex].textContent.indexOf("Bears") >= 0);
   await endViaSheet();
   ok("board reset after ending the game", $(".dd-sub").textContent.indexOf("0 plays") >= 0);
   click(byText(".nav button", "Season"));

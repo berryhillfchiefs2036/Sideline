@@ -802,8 +802,10 @@ function Sideline() {
     setSheet(null);
   };
   /* Archives the board and returns the new record's id, so the reset op that
-     follows can point straight at it. */
-  const archive = (opponent, when) => {
+     follows can point straight at it. schedId is the schedule entry the coach
+     confirmed on the End sheet — the ONLY thing that ever stamps a schedule
+     row final, so a stale tag can never stamp the wrong game invisibly. */
+  const archive = (opponent, when, schedId) => {
     const players = roster
       .map((p) => ({ id: p.id, num: p.num, name: p.name, s: statOf(p.id) }))
       .filter((r) => r.s.snaps > 0);
@@ -815,10 +817,7 @@ function Sideline() {
     const recId = uid();
     S.archiveGame({ id: recId, endedAt, opponent: opponent || "",
       us: game.us, them: game.them, playsCount: game.playCount, plays: game.plays, players,
-      scrim: !!(game.gameInfo || {}).scrim, schedId: (game.gameInfo || {}).schedId || null });
-    /* If this board was tracking a scheduled game, stamp that schedule entry
-       as completed with the final score. */
-    const schedId = (game.gameInfo || {}).schedId;
+      scrim: !!(game.gameInfo || {}).scrim, schedId: schedId || null });
     if (schedId) setSquad((s) => Object.assign({}, s, {
       schedule: (s.schedule || []).map((g) => (g.id === schedId
         ? Object.assign({}, g, { done: true, us: game.us, them: game.them }) : g)),
@@ -890,7 +889,9 @@ function Sideline() {
       window.alert("There's already a game on the board — end it first, then any saved game can be reopened.");
       return;
     }
-    if (!window.confirm("Put this game back on the board? Every play comes back, fully editable, and it leaves the Season list until you end the game again.")) return;
+    if (!window.confirm("Put " + (rec.opponent ? "vs " + rec.opponent : "this game") + " (" +
+      (rec.us || 0) + "–" + (rec.them || 0) + ", " + (rec.playsCount || 0) + " plays) back on the board? " +
+      "Every play comes back, fully editable, and it leaves the Season list until you end the game again.")) return;
     if (game.lastResetId && game.lastResetRecId && rec.id === game.lastResetRecId) {
       addOp({ type: "undo", targets: [game.lastResetId] });
     } else {
@@ -1012,9 +1013,10 @@ function Sideline() {
         <PenaltySheet roster={roster} unit={unit} teamName={teamName} onClose={() => setSheet(null)}
           onLog={(pen) => { addOp(Object.assign({ type: "pen", unit }, pen)); setSheet(null); }} />)}
       {sheet && sheet.type === "endgame" && (
-        <EndGameSheet game={game} code={code} onClose={() => setSheet(null)}
-          onEnd={(opp, when) => {
-            const recId = archive(opp, when);
+        <EndGameSheet game={game} code={code} schedule={squad.schedule || []}
+          onClose={() => setSheet(null)}
+          onEnd={(opp, when, schedId) => {
+            const recId = archive(opp, when, schedId);
             addOp({ type: "reset", recId });
             setSheet(null);
           }} />)}
@@ -1975,10 +1977,20 @@ function ThemSheet({ scores, roster, onClose, onLog }) {
 
 /* Ending a game: opponent and date sit in plain view (prefilled from the
    tracked game) so the archive never saves nameless — no popup chains. */
-function EndGameSheet({ game, code, onClose, onEnd }) {
+function EndGameSheet({ game, code, schedule, onClose, onEnd }) {
   const info = game.gameInfo || {};
   const [opp, setOpp] = useState(info.opponent || "");
   const [when, setWhen] = useState(info.date || new Date().toISOString().slice(0, 10));
+  /* Which schedule entry gets stamped final is chosen HERE, in the open —
+     defaulting to the tracked game but never stamping anything unseen. */
+  const sched = schedule || [];
+  const [schedSel, setSchedSel] = useState(
+    info.schedId && sched.some((g) => g.id === info.schedId) ? info.schedId : "");
+  const pickSched = (id) => {
+    setSchedSel(id);
+    const entry = sched.find((g) => g.id === id);
+    if (entry && !opp.trim()) setOpp(entry.opponent || "");
+  };
   return (
     <div className="veil" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
@@ -2002,7 +2014,22 @@ function EndGameSheet({ game, code, onClose, onEnd }) {
         <div className="eyebrow" style={{ margin: "12px 0 6px" }}>What date was it played?</div>
         <input className="inp" type="date" aria-label="Game date" value={when}
           onChange={(e) => setWhen(e.target.value)} />
-        <button className="confirm" onClick={() => onEnd(opp.trim(), when)}>
+        {sched.length > 0 && (
+          <React.Fragment>
+            <div className="eyebrow" style={{ margin: "12px 0 6px" }}>
+              Mark a scheduled game final with this score</div>
+            <select className="inp" aria-label="Schedule game to mark final" value={schedSel}
+              onChange={(e) => pickSched(e.target.value)}>
+              <option value="">None — don't touch the schedule</option>
+              {sched.map((g) => (
+                <option key={g.id} value={g.id}>
+                  vs {g.opponent} — {g.date}{g.done ? " (already final " + g.us + "–" + g.them + ")" : ""}
+                </option>
+              ))}
+            </select>
+          </React.Fragment>
+        )}
+        <button className="confirm" onClick={() => onEnd(opp.trim(), when, schedSel || null)}>
           End the game — save it to the Season</button>
       </div>
     </div>

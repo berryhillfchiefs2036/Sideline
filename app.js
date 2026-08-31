@@ -1371,8 +1371,10 @@ function Sideline() {
     setSheet(null);
   };
   /* Archives the board and returns the new record's id, so the reset op that
-     follows can point straight at it. */
-  const archive = (opponent, when) => {
+     follows can point straight at it. schedId is the schedule entry the coach
+     confirmed on the End sheet — the ONLY thing that ever stamps a schedule
+     row final, so a stale tag can never stamp the wrong game invisibly. */
+  const archive = (opponent, when, schedId) => {
     const players = roster.map(p => ({
       id: p.id,
       num: p.num,
@@ -1393,11 +1395,8 @@ function Sideline() {
       plays: game.plays,
       players,
       scrim: !!(game.gameInfo || {}).scrim,
-      schedId: (game.gameInfo || {}).schedId || null
+      schedId: schedId || null
     });
-    /* If this board was tracking a scheduled game, stamp that schedule entry
-       as completed with the final score. */
-    const schedId = (game.gameInfo || {}).schedId;
     if (schedId) setSquad(s => Object.assign({}, s, {
       schedule: (s.schedule || []).map(g => g.id === schedId ? Object.assign({}, g, {
         done: true,
@@ -1497,7 +1496,7 @@ function Sideline() {
       window.alert("There's already a game on the board — end it first, then any saved game can be reopened.");
       return;
     }
-    if (!window.confirm("Put this game back on the board? Every play comes back, fully editable, and it leaves the Season list until you end the game again.")) return;
+    if (!window.confirm("Put " + (rec.opponent ? "vs " + rec.opponent : "this game") + " (" + (rec.us || 0) + "–" + (rec.them || 0) + ", " + (rec.playsCount || 0) + " plays) back on the board? " + "Every play comes back, fully editable, and it leaves the Season list until you end the game again.")) return;
     if (game.lastResetId && game.lastResetRecId && rec.id === game.lastResetRecId) {
       addOp({
         type: "undo",
@@ -1788,9 +1787,10 @@ function Sideline() {
   }), sheet && sheet.type === "endgame" && /*#__PURE__*/React.createElement(EndGameSheet, {
     game: game,
     code: code,
+    schedule: squad.schedule || [],
     onClose: () => setSheet(null),
-    onEnd: (opp, when) => {
-      const recId = archive(opp, when);
+    onEnd: (opp, when, schedId) => {
+      const recId = archive(opp, when, schedId);
       addOp({
         type: "reset",
         recId
@@ -3312,12 +3312,22 @@ function ThemSheet({
 function EndGameSheet({
   game,
   code,
+  schedule,
   onClose,
   onEnd
 }) {
   const info = game.gameInfo || {};
   const [opp, setOpp] = useState(info.opponent || "");
   const [when, setWhen] = useState(info.date || new Date().toISOString().slice(0, 10));
+  /* Which schedule entry gets stamped final is chosen HERE, in the open —
+     defaulting to the tracked game but never stamping anything unseen. */
+  const sched = schedule || [];
+  const [schedSel, setSchedSel] = useState(info.schedId && sched.some(g => g.id === info.schedId) ? info.schedId : "");
+  const pickSched = id => {
+    setSchedSel(id);
+    const entry = sched.find(g => g.id === id);
+    if (entry && !opp.trim()) setOpp(entry.opponent || "");
+  };
   return /*#__PURE__*/React.createElement("div", {
     className: "veil",
     onClick: onClose
@@ -3367,9 +3377,24 @@ function EndGameSheet({
     "aria-label": "Game date",
     value: when,
     onChange: e => setWhen(e.target.value)
-  }), /*#__PURE__*/React.createElement("button", {
+  }), sched.length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "12px 0 6px"
+    }
+  }, "Mark a scheduled game final with this score"), /*#__PURE__*/React.createElement("select", {
+    className: "inp",
+    "aria-label": "Schedule game to mark final",
+    value: schedSel,
+    onChange: e => pickSched(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "None \u2014 don't touch the schedule"), sched.map(g => /*#__PURE__*/React.createElement("option", {
+    key: g.id,
+    value: g.id
+  }, "vs ", g.opponent, " \u2014 ", g.date, g.done ? " (already final " + g.us + "–" + g.them + ")" : "")))), /*#__PURE__*/React.createElement("button", {
     className: "confirm",
-    onClick: () => onEnd(opp.trim(), when)
+    onClick: () => onEnd(opp.trim(), when, schedSel || null)
   }, "End the game \u2014 save it to the Season")));
 }
 function QuarterSheet({
