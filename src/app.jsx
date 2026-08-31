@@ -145,8 +145,11 @@ function fold(ops) {
   /* Amends can move a play's timestamp, so order by effective time. */
   live.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
   const lastReset = live.map((o) => o.type).lastIndexOf("reset");
-  /* Remembered so the last End game can be undone — reopening that game. */
+  /* Remembered so the last End game can be undone — reopening that game.
+     recId names the archive record that End created, so reopening never has
+     to guess which saved game the undo brings back. */
   const lastResetId = lastReset >= 0 ? live[lastReset].id : null;
+  const lastResetRecId = lastReset >= 0 ? live[lastReset].recId || null : null;
   if (lastReset >= 0) live = live.slice(lastReset + 1);
 
   const g = BASE();
@@ -225,6 +228,7 @@ function fold(ops) {
   });
   g.live = live;
   g.lastResetId = lastResetId;
+  g.lastResetRecId = lastResetRecId;
   g.playCount = g.plays.filter((p) => p.type !== "pen").length;
   return g;
 }
@@ -797,6 +801,8 @@ function Sideline() {
       pts: score && score !== "none" ? scorePts || 0 : null, snaps: fieldIds });
     setSheet(null);
   };
+  /* Archives the board and returns the new record's id, so the reset op that
+     follows can point straight at it. */
   const archive = (opponent, when) => {
     const players = roster
       .map((p) => ({ id: p.id, num: p.num, name: p.name, s: statOf(p.id) }))
@@ -806,7 +812,8 @@ function Sideline() {
     const endedAt = /^\d{4}-\d{2}-\d{2}$/.test((when || "").trim())
       ? new Date(when.trim() + "T12:00:00").toISOString()
       : new Date().toISOString();
-    S.archiveGame({ id: uid(), endedAt, opponent: opponent || "",
+    const recId = uid();
+    S.archiveGame({ id: recId, endedAt, opponent: opponent || "",
       us: game.us, them: game.them, playsCount: game.playCount, plays: game.plays, players,
       scrim: !!(game.gameInfo || {}).scrim, schedId: (game.gameInfo || {}).schedId || null });
     /* If this board was tracking a scheduled game, stamp that schedule entry
@@ -816,21 +823,20 @@ function Sideline() {
       schedule: (s.schedule || []).map((g) => (g.id === schedId
         ? Object.assign({}, g, { done: true, us: game.us, them: game.them }) : g)),
     }));
+    return recId;
   };
 
   const endGame = () => {
-    const msg = code
-      ? "End this game for all coaches? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put."
-      : "End this game? It's saved to the Season tab, then the score, play log, and stats clear for the next one. Roster and lineups stay put.";
-    if (!window.confirm(msg)) return;
-    if (game.plays.length > 0) {
-      const info = game.gameInfo || {};
-      const opp = window.prompt("Who was this game against? (optional)", info.opponent || "") || "";
-      const when = window.prompt("What date was it played? (YYYY-MM-DD)",
-        info.date || new Date().toISOString().slice(0, 10)) || "";
-      archive(opp, when);
+    /* An empty board has nothing to archive — just clear it. Anything with
+       plays goes through the End sheet so the opponent and date are staring
+       at the coach instead of hiding in a popup that's easy to dismiss. */
+    if (game.plays.length === 0) {
+      if (window.confirm("Clear this board? Nothing is saved — there are no plays on it.")) {
+        addOp({ type: "reset" });
+      }
+      return;
     }
-    addOp({ type: "reset" });
+    setSheet({ type: "endgame" });
   };
   /* Tapping a scheduled game tags the live board with it: plays logged from
      here on archive under that opponent and date. The tag is an op, so it
@@ -842,10 +848,13 @@ function Sideline() {
       "). Tracking it again starts a brand-new game on the board — to see or fix the finished one, " +
       "use Stats or Reopen on the Season list. Track it again anyway?")) return;
     const info = game.gameInfo || {};
+    /* Never switch which game a full board belongs to — that's how one
+       game's plays and score end up stamped on another game. */
     if (game.plays.length > 0 && info.schedId !== g.id) {
-      if (!window.confirm("The board already has " + game.plays.length + " plays" +
-        (info.opponent ? " (vs " + info.opponent + ")" : "") + ". OK tags them all as the " +
-        (g.opponent || "scheduled") + " game — or Cancel and finish the other game first on the Stats tab.")) return;
+      window.alert("The board has " + game.plays.length + " plays" +
+        (info.opponent ? " from vs " + info.opponent : "") + " on it. End that game first — " +
+        "then start " + (g.opponent ? "the " + g.opponent + " game" : "the next one") + " fresh.");
+      return;
     }
     addOp({ type: "set", field: "gameInfo",
       value: { schedId: g.id, opponent: g.opponent, date: g.date, scrim: !!g.scrim } });
@@ -876,16 +885,13 @@ function Sideline() {
      original authors); older games are rebuilt from the archive's stored
      play-by-play, re-timestamped to now so the replay picks them up. */
   const boardEmpty = game.playCount === 0 && game.plays.length === 0;
-  const newestArchived = S.games.length
-    ? S.games.slice().sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1))[0] : null;
-  const reopenableId = boardEmpty && game.lastResetId && newestArchived ? newestArchived.id : null;
   const reopenGame = (rec) => {
     if (!boardEmpty) {
       window.alert("There's already a game on the board — end it first, then any saved game can be reopened.");
       return;
     }
     if (!window.confirm("Put this game back on the board? Every play comes back, fully editable, and it leaves the Season list until you end the game again.")) return;
-    if (reopenableId && rec.id === reopenableId) {
+    if (game.lastResetId && game.lastResetRecId && rec.id === game.lastResetRecId) {
       addOp({ type: "undo", targets: [game.lastResetId] });
     } else {
       const base = Date.now();
@@ -1005,6 +1011,13 @@ function Sideline() {
       {sheet && sheet.type === "pen" && (
         <PenaltySheet roster={roster} unit={unit} teamName={teamName} onClose={() => setSheet(null)}
           onLog={(pen) => { addOp(Object.assign({ type: "pen", unit }, pen)); setSheet(null); }} />)}
+      {sheet && sheet.type === "endgame" && (
+        <EndGameSheet game={game} code={code} onClose={() => setSheet(null)}
+          onEnd={(opp, when) => {
+            const recId = archive(opp, when);
+            addOp({ type: "reset", recId });
+            setSheet(null);
+          }} />)}
       {sheet && sheet.type === "crew" && (
         <CrewSheet me={S.me} code={code} sync={sync} available={S.crewAvailable} onJoin={S.joinCrew}
           onLeave={S.leaveCrew} onRename={S.renameMe} onClose={() => setSheet(null)} />)}
@@ -1960,6 +1973,42 @@ function ThemSheet({ scores, roster, onClose, onLog }) {
   );
 }
 
+/* Ending a game: opponent and date sit in plain view (prefilled from the
+   tracked game) so the archive never saves nameless — no popup chains. */
+function EndGameSheet({ game, code, onClose, onEnd }) {
+  const info = game.gameInfo || {};
+  const [opp, setOpp] = useState(info.opponent || "");
+  const [when, setWhen] = useState(info.date || new Date().toISOString().slice(0, 10));
+  return (
+    <div className="veil" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-hd">
+          <div className="plate" style={{ minWidth: 62, fontSize: 16 }}>{game.us}–{game.them}</div>
+          <div>
+            <div className="sheet-ttl">End this game</div>
+            <div className="eyebrow">{game.playCount} plays · saves to the Season tab</div>
+          </div>
+          <button className="close" onClick={onClose}>Cancel</button>
+        </div>
+        <div className="empty-note" style={{ textAlign: "left", marginBottom: 12 }}>
+          {code ? "Ends it for every coach on the crew. " : ""}
+          The score, play log, and stats archive under this opponent and date, then the board
+          clears for the next game. Roster and lineups stay put, and the saved game can always
+          be reopened from the Season tab.
+        </div>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Who was it against?</div>
+        <input className="inp" aria-label="Opponent" placeholder="Opposing team" value={opp}
+          onChange={(e) => setOpp(e.target.value)} />
+        <div className="eyebrow" style={{ margin: "12px 0 6px" }}>What date was it played?</div>
+        <input className="inp" type="date" aria-label="Game date" value={when}
+          onChange={(e) => setWhen(e.target.value)} />
+        <button className="confirm" onClick={() => onEnd(opp.trim(), when)}>
+          End the game — save it to the Season</button>
+      </div>
+    </div>
+  );
+}
+
 function QuarterSheet({ quarter, onAdvance, onBack, onEndGame, onClose }) {
   return (
     <div className="veil" onClick={onClose}>
@@ -2619,6 +2668,12 @@ function ScheduleSection({ squad, setSquad, onTrack, onTrackDone }) {
   };
   const remove = (id) =>
     setSquad((s) => Object.assign({}, s, { schedule: (s.schedule || []).filter((g) => g.id !== id) }));
+  /* A wrong final stamp (ended under the wrong matchup) can be wiped without
+     touching any saved game — the row just goes back to upcoming. */
+  const clearFinal = (id) =>
+    setSquad((s) => Object.assign({}, s, {
+      schedule: (s.schedule || []).map((g) => (g.id === id
+        ? Object.assign({}, g, { done: false, us: null, them: null }) : g)) }));
 
   const fmtDate = (d) => new Date(d + "T12:00:00")
     .toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
@@ -2663,6 +2718,14 @@ function ScheduleSection({ squad, setSquad, onTrack, onTrackDone }) {
             </div>
             <button className="mini dark"
               onClick={() => (g.done && onTrackDone ? onTrackDone(g) : onTrack(g))}>Add stats</button>
+            {g.done && (
+              <button className="mini" onClick={() => {
+                if (window.confirm("Clear the " + g.us + "–" + g.them + " final off this scheduled game? " +
+                  "Saved games on the Season list aren't touched — the matchup just goes back to upcoming.")) {
+                  clearFinal(g.id);
+                }
+              }}>Clear final</button>
+            )}
             <button className="mini" onClick={() => {
               if (window.confirm("Take this game off the schedule?")) remove(g.id);
             }}>Remove</button>

@@ -21,6 +21,7 @@ Object.defineProperty(w, "localStorage", {
 w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {} });
 w.confirm = () => true;
 w.prompt = () => "Eagles";
+w.alert = () => {};
 
 const load = (f) => w.eval(fs.readFileSync(path.join(root, f), "utf8"));
 load("config.js");
@@ -46,6 +47,13 @@ const type = (el, val) => {
   const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
   setter.call(el, val);
   el.dispatchEvent(new w.Event("input", { bubbles: true }));
+};
+// Ending a game now runs through the End sheet; optionally set the opponent first.
+const endViaSheet = async (opp) => {
+  const oppInp = $$(".sheet input").find((i) => i.getAttribute("aria-label") === "Opponent");
+  if (opp !== undefined) type(oppInp, opp);
+  click(byText(".confirm", "End the game — save it"));
+  await new Promise((r) => setTimeout(r, 30));
 };
 
 (async () => {
@@ -241,6 +249,9 @@ const type = (el, val) => {
   await flush();
   click(byText(".abtn", "Start a new game"));
   await flush();
+  ok("end sheet asks for the opponent in plain view",
+    !!$$(".sheet input").find((i) => i.getAttribute("aria-label") === "Opponent"));
+  await endViaSheet("Eagles");
   click(byText(".nav button", "Game"));
   await flush();
   ok("board reset for the next game", $(".dd-sub").textContent.indexOf("0 plays") >= 0);
@@ -320,6 +331,9 @@ const type = (el, val) => {
   ok("end-game button appears once plays exist", !!byText(".abtn", "End game"));
   click(byText(".abtn", "End game"));
   await flush();
+  const bearsPre = $$(".sheet input").find((i) => i.getAttribute("aria-label") === "Opponent");
+  ok("end sheet prefills the tracked opponent", !!bearsPre && bearsPre.value === "Bears");
+  await endViaSheet();
   ok("board reset after ending the game", $(".dd-sub").textContent.indexOf("0 plays") >= 0);
   click(byText(".nav button", "Season"));
   await flush();
@@ -938,11 +952,13 @@ const type = (el, val) => {
   const playsBeforeEnd = $(".dd-sub").textContent;
   click(byText(".abtn", "End game"));
   await flush();
+  await endViaSheet();
   ok("board reset after ending the game again", $(".dd-sub").textContent.indexOf("0 plays") >= 0);
   click(byText(".nav button", "Season"));
   await flush();
-  ok("reopen offered on the newest archived game", !!byText(".mini", "Reopen"));
-  click(byText(".mini", "Reopen"));
+  ok("reopen offered on archived games", !!byText(".mini", "Reopen"));
+  const endedRow = byText(".row", "4–8");
+  click(Array.from(endedRow.querySelectorAll(".mini")).find((b) => b.textContent === "Reopen"));
   await flush();
   ok("reopened game restored its plays", $(".dd-sub").textContent === playsBeforeEnd);
   ok("play log came back editable", $$(".logline").length > 0 &&
@@ -1085,6 +1101,7 @@ const type = (el, val) => {
   await flush();
   click(byText(".abtn", "End game"));
   await flush();
+  await endViaSheet();
   ok("board cleared before the scrimmage", $(".dd-sub").textContent.indexOf("0 plays") >= 0);
   click(byText(".nav button", "Season"));
   await flush();
@@ -1119,12 +1136,18 @@ const type = (el, val) => {
   ok("scrimmage touchdown on the board", $$(".score-num")[0].textContent === "6");
   click(byText(".abtn", "End game"));
   await flush();
+  await endViaSheet();
   click(byText(".nav button", "Season"));
   await flush();
   ok("scrimmage stays out of the record", $(".dd-main").textContent === "1–1–1");
   const psRow = byText(".row", "Practice Squad");
   ok("finished scheduled games still offer Add stats",
     !!psRow && Array.from(psRow.querySelectorAll(".mini")).some((b) => b.textContent === "Add stats"));
+  click(Array.from(psRow.querySelectorAll(".mini")).find((b) => b.textContent === "Clear final"));
+  await flush();
+  const psRow2 = byText(".row", "Practice Squad");
+  ok("clear final puts the matchup back on the schedule",
+    !!psRow2 && psRow2.textContent.indexOf("final") < 0);
   ok("scrimmage game listed and tagged", $$(".row").some((r) => r.querySelector(".plate") &&
     r.querySelector(".plate").textContent === "6–0" && r.textContent.indexOf("scrimmage") >= 0));
 
@@ -1179,6 +1202,7 @@ const type = (el, val) => {
   console.log("\nreopen an older game from its archive");
   click(byText(".abtn", "End game"));
   await flush();
+  await endViaSheet();
   click(byText(".nav button", "Season"));
   await flush();
   const oldRow = byText(".row", "7–0");
