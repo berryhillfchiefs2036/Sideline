@@ -63,6 +63,22 @@ const endViaSheet = async (opp) => {
   ok("scoreboard shows 1st & 10", $(".dd-main").textContent.replace(/\s+/g, " ").indexOf("1st & 10") >= 0);
   ok("solo mode by default", $(".crew").textContent.indexOf("Just you") >= 0);
 
+  console.log("\ncoach accounts");
+  click($(".crew"));
+  await flush();
+  ok("crew sheet asks for a coach account",
+    !!$$(".sheet input").find((i) => i.getAttribute("aria-label") === "Email") &&
+    !!$$(".sheet input").find((i) => i.getAttribute("aria-label") === "Password"));
+  ok("sign-in and create-account offered", !!byText(".sheet .confirm", "Sign in") &&
+    !!byText(".sheet .mini", "Create an account"));
+  const createCrewBtn = byText(".confirm", "Create a code");
+  ok("creating a crew waits for sign-in", !!createCrewBtn && createCrewBtn.disabled === true);
+  const joinCrewBtn = byText(".confirm", "Join this game");
+  ok("joining a crew waits for sign-in", !!joinCrewBtn && joinCrewBtn.disabled === true);
+  click(byText(".close", "Done"));
+  await flush();
+  ok("crew sheet closes", !$(".sheet"));
+
   console.log("\nroster");
   click(byText(".nav button", "Roster"));
   await flush();

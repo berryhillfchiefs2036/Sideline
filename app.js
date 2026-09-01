@@ -893,6 +893,7 @@ const K_SOLO_GAMES = "sideline.solo.games";
 const kCrewOps = c => `sideline.crew.${c}.ops`;
 const kCrewSquad = c => `sideline.crew.${c}.squad`;
 const kCrewGames = c => `sideline.crew.${c}.games`;
+const kCrewWatch = c => `sideline.crew.${c}.watch`;
 const CFG = window.SIDELINE_CONFIG || {};
 const CREW_ON = !!(CFG.supabaseUrl && CFG.supabaseAnonKey && CFG.supabaseUrl.indexOf("YOUR-") < 0);
 const sb = CREW_ON ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
@@ -942,6 +943,48 @@ function useSideline() {
   meRef.current = me;
   const squadRef = useRef(squad);
   squadRef.current = squad;
+
+  /* ---- coach account (Supabase Auth) ---- */
+  const [user, setUser] = useState(null);
+  const [watch, setWatch] = useState(() => saved && saved.code ? LS.get(kCrewWatch(saved.code), null) : null);
+  useEffect(() => {
+    if (!sb) return undefined;
+    sb.auth.getSession().then(({
+      data
+    }) => setUser(data && data.session ? data.session.user : null)).catch(() => {});
+    const res = sb.auth.onAuthStateChange((_ev, session) => setUser(session ? session.user : null));
+    return () => {
+      try {
+        res.data.subscription.unsubscribe();
+      } catch (e) {/* noop */}
+    };
+  }, []);
+
+  /* Returns null on success, "CHECK_EMAIL" when a new account needs its
+     confirmation email, or a human-readable error string. */
+  const authAction = useCallback(async (mode, email, password) => {
+    if (!sb) return "Crew sync isn't set up on this deployment.";
+    try {
+      const {
+        data,
+        error
+      } = mode === "signup" ? await sb.auth.signUp({
+        email,
+        password
+      }) : await sb.auth.signInWithPassword({
+        email,
+        password
+      });
+      if (error) return error.message || "That didn't work — try again.";
+      if (mode === "signup" && data && !data.session) return "CHECK_EMAIL";
+      return null;
+    } catch (e) {
+      return "No connection — try again.";
+    }
+  }, []);
+  const signOut = useCallback(() => {
+    if (sb) sb.auth.signOut().catch(() => {});
+  }, []);
 
   /* ---- writers ---- */
   const pushOps = useCallback(async (ops, who) => {
@@ -1188,10 +1231,37 @@ function useSideline() {
   /* ---- crew membership ---- */
   /* carrySquad: when starting a brand-new crew, bring the current roster,
      lineups, and schedule along instead of starting the crew empty. Joining
-     an existing code never does this, so a joiner can't clobber the crew. */
-  const joinCrew = useCallback((c, name, carrySquad) => {
+     an existing code never does this, so a joiner can't clobber the crew.
+     Returns null on success, or a human-readable error string. */
+  const joinCrew = useCallback(async (c, name, carrySquad) => {
     const clean = (c || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
-    if (clean.length < 4) return;
+    if (clean.length < 4) return "That code is too short.";
+    /* Signed-in coaches register membership (and claim unclaimed codes)
+       through sideline_join. If the database hasn't been migrated to the
+       accounts schema yet, the function won't exist — join the old way so
+       nothing breaks mid-upgrade. */
+    let watchCode = clean;
+    if (sb) {
+      try {
+        const s = await sb.auth.getSession();
+        if (s && s.data && s.data.session) {
+          const r = await sb.rpc("sideline_join", {
+            code: clean,
+            name: name || null
+          });
+          if (r.error) {
+            const missing = r.error.code === "PGRST202" || /function .*does not exist|schema cache/i.test(r.error.message || "");
+            if (!missing) return "Couldn't join: " + (r.error.message || "unknown error");
+          } else if (r.data && r.data.watch_code) {
+            watchCode = r.data.watch_code;
+          }
+        }
+      } catch (e) {
+        return "No connection — check your signal and try again.";
+      }
+    }
+    LS.set(kCrewWatch(clean), watchCode);
+    setWatch(watchCode);
     const next = {
       id: meRef.current.id,
       name: name !== undefined ? name : meRef.current.name
@@ -1227,6 +1297,7 @@ function useSideline() {
       at: null
     });
     setCode(clean);
+    return null;
   }, []);
   const renameMe = useCallback(name => {
     const next = {
@@ -1277,7 +1348,11 @@ function useSideline() {
     archiveGame,
     editGame,
     removeGame,
-    importGames
+    importGames,
+    user,
+    watch,
+    authAction,
+    signOut
   };
 }
 
@@ -1613,7 +1688,7 @@ function Sideline() {
       targets
     });
   };
-  const statusText = !code ? "Tap to add coaches" : sync.state === "noconfig" ? "needs setup" : sync.state === "offline" ? "saved on this phone, will retry" : sync.state === "connecting" ? "connecting" : `${sync.coaches} ${sync.coaches === 1 ? "coach" : "coaches"} · live`;
+  const statusText = !code ? "Tap to add coaches" : sync.state === "noconfig" ? "needs setup" : sync.state === "offline" ? S.user ? "saved on this phone, will retry" : "tap to sign in" : sync.state === "connecting" ? "connecting" : `${sync.coaches} ${sync.coaches === 1 ? "coach" : "coaches"} · live`;
   return /*#__PURE__*/React.createElement("div", {
     className: "sl"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1856,6 +1931,10 @@ function Sideline() {
     sync: sync,
     available: S.crewAvailable,
     onJoin: S.joinCrew,
+    user: S.user,
+    watch: S.watch,
+    onAuth: S.authAction,
+    onSignOut: S.signOut,
     onLeave: S.leaveCrew,
     onRename: S.renameMe,
     onClose: () => setSheet(null)
@@ -3670,6 +3749,10 @@ function CrewSheet({
   code,
   sync,
   available,
+  user,
+  watch,
+  onAuth,
+  onSignOut,
   onJoin,
   onLeave,
   onRename,
@@ -3677,7 +3760,90 @@ function CrewSheet({
 }) {
   const [entry, setEntry] = useState("");
   const [name, setName] = useState(me && me.name || "");
+  const [email, setEmail] = useState("");
+  const [pass, setPass] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   const ready = entry.replace(/[^A-Za-z0-9]/g, "").length >= 4;
+  const doAuth = async mode => {
+    setErr("");
+    setBusy(true);
+    const r = await onAuth(mode, email.trim(), pass);
+    setBusy(false);
+    if (r === "CHECK_EMAIL") {
+      setErr("Account created — check your email for the confirmation link, then sign in here.");
+    } else if (r) setErr(r);
+  };
+  const doJoin = async (codeArg, carry) => {
+    setErr("");
+    setBusy(true);
+    const r = await onJoin(codeArg, name, carry);
+    setBusy(false);
+    if (r) setErr(r);
+  };
+
+  /* One free account per coach — it's what keeps other teams out of your
+     games now that every crew's data is locked to its members. */
+  const authBox = /*#__PURE__*/React.createElement("div", {
+    className: "yardbox",
+    style: {
+      marginTop: 10,
+      textAlign: "left"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      marginBottom: 6
+    }
+  }, "Coach account"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: "var(--soft)",
+      lineHeight: 1.5,
+      marginBottom: 8
+    }
+  }, "Coaching a crew needs a free account, so only your coaches can touch your team's games. One account works for every team you coach."), /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    "aria-label": "Email",
+    type: "email",
+    placeholder: "Email",
+    value: email,
+    autoComplete: "username",
+    onChange: e => setEmail(e.target.value)
+  }), /*#__PURE__*/React.createElement("input", {
+    className: "inp",
+    "aria-label": "Password",
+    type: "password",
+    placeholder: "Password (8+ characters)",
+    style: {
+      marginTop: 8
+    },
+    value: pass,
+    autoComplete: "current-password",
+    onChange: e => setPass(e.target.value)
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "confirm",
+    style: {
+      flex: 1,
+      marginTop: 0
+    },
+    disabled: busy || !email.trim() || !pass,
+    onClick: () => doAuth("signin")
+  }, "Sign in"), /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    style: {
+      flex: "0 0 auto",
+      padding: "10px 14px"
+    },
+    disabled: busy || !email.trim() || !pass,
+    onClick: () => doAuth("signup")
+  }, "Create an account")));
   return /*#__PURE__*/React.createElement("div", {
     className: "veil",
     onClick: onClose
@@ -3699,7 +3865,13 @@ function CrewSheet({
       textAlign: "left",
       marginBottom: 14
     }
-  }, "Sharing a game across phones needs a database. Add your Supabase URL and anon key to ", /*#__PURE__*/React.createElement("b", null, "config.js"), " in the repo and this turns on. Until then everything works fine on one phone."), code ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, "Sharing a game across phones needs a database. Add your Supabase URL and anon key to ", /*#__PURE__*/React.createElement("b", null, "config.js"), " in the repo and this turns on. Until then everything works fine on one phone."), err && /*#__PURE__*/React.createElement("div", {
+    className: "banner",
+    style: {
+      marginTop: 0,
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", null, err)), code ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "yardbox",
     style: {
       marginTop: 0,
@@ -3737,7 +3909,7 @@ function CrewSheet({
       padding: 10
     },
     onClick: () => {
-      const link = window.location.origin + window.location.pathname + "?watch=" + code;
+      const link = window.location.origin + window.location.pathname + "?watch=" + (watch || code);
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(link).then(() => window.alert("Watch link copied:\n" + link), () => window.prompt("Copy the watch link:", link));
       } else window.prompt("Copy the watch link:", link);
@@ -3764,7 +3936,22 @@ function CrewSheet({
   }), /*#__PURE__*/React.createElement("button", {
     className: "mini dark",
     onClick: () => onRename(name)
-  }, "Save")), /*#__PURE__*/React.createElement("button", {
+  }, "Save")), user ? /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 13,
+      color: "var(--soft)"
+    }
+  }, "Signed in as ", /*#__PURE__*/React.createElement("b", null, user.email)), /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    onClick: onSignOut
+  }, "Sign out")) : available && authBox, /*#__PURE__*/React.createElement("button", {
     className: "abtn ghost",
     style: {
       width: "100%",
@@ -3780,7 +3967,7 @@ function CrewSheet({
       textAlign: "left",
       marginTop: 12
     }
-  }, "Anyone with this link and code can read and change the game. Keep it to jersey numbers and first names.")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, "Any signed-in coach who types in the crew code joins the crew, so share it only with your staff. Keep rosters to jersey numbers and first names.")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "row",
     style: {
       marginBottom: 14
@@ -3790,18 +3977,30 @@ function CrewSheet({
     placeholder: "Your name (shows on the play log)",
     value: name,
     onChange: e => setName(e.target.value)
-  })), /*#__PURE__*/React.createElement("div", {
+  })), available && !user && authBox, available && user && /*#__PURE__*/React.createElement("div", {
+    className: "row"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 13,
+      color: "var(--soft)"
+    }
+  }, "Signed in as ", /*#__PURE__*/React.createElement("b", null, user.email)), /*#__PURE__*/React.createElement("button", {
+    className: "mini",
+    onClick: onSignOut
+  }, "Sign out")), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
-      marginBottom: 6
+      margin: "14px 0 6px"
     }
   }, "Start a crew"), /*#__PURE__*/React.createElement("button", {
     className: "confirm",
     style: {
       marginTop: 0
     },
-    disabled: !available,
-    onClick: () => onJoin(makeCode(), name, true)
+    disabled: !available || !user || busy,
+    onClick: () => doJoin(makeCode(), true)
   }, "Create a code"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
@@ -3809,7 +4008,7 @@ function CrewSheet({
       marginTop: 6,
       lineHeight: 1.4
     }
-  }, "Your roster, lineups, and schedule come with you \u2014 the other coaches see them as soon as they join."), /*#__PURE__*/React.createElement("div", {
+  }, user ? "Your roster, lineups, and schedule come with you — the other coaches see them as soon as they join." : "Sign in above first — crews are locked to their coaches' accounts."), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       margin: "18px 0 6px"
@@ -3822,8 +4021,8 @@ function CrewSheet({
     onChange: e => setEntry(e.target.value.toUpperCase())
   }), /*#__PURE__*/React.createElement("button", {
     className: "confirm alt",
-    disabled: !ready || !available,
-    onClick: () => onJoin(entry, name)
+    disabled: !ready || !available || !user || busy,
+    onClick: () => doJoin(entry)
   }, "Join this game"), /*#__PURE__*/React.createElement("button", {
     className: "abtn ghost",
     style: {
@@ -3840,7 +4039,7 @@ function CrewSheet({
       textAlign: "left",
       marginTop: 14
     }
-  }, "Your solo roster stays on this phone and comes back if you leave the crew."))));
+  }, "Watching needs no account \u2014 just the watch code from a coach. Your solo roster stays on this phone and comes back if you leave the crew."))));
 }
 
 /* ============================ ROSTER ============================ */
@@ -5418,18 +5617,32 @@ function GameCast({
     let alive = true;
     const pull = async () => {
       try {
-        const rows = await sb.from(T_OPS).select("coach_id,coach_name,ops").eq("game_code", code);
-        if (rows.error) throw rows.error;
         const out = [];
-        (rows.data || []).forEach(r => (r.ops || []).forEach(o => out.push(Object.assign({}, o, {
-          byName: r.coach_name || "Coach"
-        }))));
+        let sqd = null;
+        /* Accounts-era path: the read-only watch feed. Falls back to direct
+           table reads for a database still on the open (pre-auth) schema. */
+        const r = await sb.rpc("sideline_watch", {
+          code
+        });
+        if (!r.error && r.data) {
+          (r.data.ops || []).forEach(row => (row.ops || []).forEach(o => out.push(Object.assign({}, o, {
+            byName: row.coach_name || "Coach"
+          }))));
+          sqd = r.data.squad || null;
+        } else {
+          const rows = await sb.from(T_OPS).select("coach_id,coach_name,ops").eq("game_code", code);
+          if (rows.error) throw rows.error;
+          (rows.data || []).forEach(row => (row.ops || []).forEach(o => out.push(Object.assign({}, o, {
+            byName: row.coach_name || "Coach"
+          }))));
+          const sq = await sb.from(T_SQUAD).select("squad").eq("game_code", code).maybeSingle();
+          if (!sq.error && sq.data) sqd = sq.data.squad || null;
+        }
         out.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
         if (!alive) return;
         setOps(out);
         setStatus("live");
-        const sq = await sb.from(T_SQUAD).select("squad").eq("game_code", code).maybeSingle();
-        if (alive && !sq.error && sq.data && sq.data.squad) setSquadState(sq.data.squad);
+        if (sqd) setSquadState(sqd);
       } catch (e) {
         if (alive) setStatus("offline");
       }
