@@ -125,6 +125,30 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function public.sideline_watch(text) to anon, authenticated;
 
+-- Delete a whole team, permanently. Only the crew's owner (the coach who
+-- created it) can run this. Everything goes: plays, roster, saved games,
+-- membership, and the crew itself — no operator involvement needed.
+create or replace function public.sideline_delete_crew(code text)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  c text := upper(code);
+begin
+  if auth.uid() is null then
+    raise exception 'Sign in first.';
+  end if;
+  if not exists (select 1 from sideline_crews where game_code = c and owner = auth.uid()) then
+    raise exception 'Only the coach who created this team can delete it.';
+  end if;
+  delete from sideline_ops    where game_code = c;
+  delete from sideline_squads where game_code = c;
+  delete from sideline_games  where game_code = c;
+  delete from sideline_crews  where game_code = c;  -- members cascade away
+end;
+$$;
+revoke execute on function public.sideline_delete_crew(text) from public, anon;
+grant execute on function public.sideline_delete_crew(text) to authenticated;
+
 -- ---------- row level security ----------
 
 alter table public.sideline_ops     enable row level security;

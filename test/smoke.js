@@ -88,6 +88,8 @@ const endViaSheet = async (opp) => {
     ? fs.readFileSync(path.join(root, "terms.html"), "utf8") : "";
   ok("terms page covers terms and privacy",
     termsHtml.indexOf("Terms of Service") >= 0 && termsHtml.indexOf("Privacy Policy") >= 0);
+  ok("privacy promises self-service deletion",
+    termsHtml.indexOf("self-service") >= 0 && termsHtml.indexOf("delete the entire team") >= 0);
 
   console.log("\nroster");
   click(byText(".nav button", "Roster"));

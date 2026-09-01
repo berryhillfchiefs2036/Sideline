@@ -1330,6 +1330,39 @@ function useSideline() {
     setSquadLocal(LS.get(K_SOLO_SQUAD, freshSquad()));
     setGamesLocal(LS.get(K_SOLO_GAMES, []));
   }, [code]);
+
+  /* Owner-only: permanently erase the whole team from the server (plays,
+     roster, saved games, membership, crew) and drop this phone back to solo.
+     Returns null on success or a human-readable error. */
+  const deleteCrew = useCallback(async () => {
+    if (!code) return "You're not in a crew.";
+    if (!sb) return "Crew sync isn't set up on this deployment.";
+    try {
+      const r = await sb.rpc("sideline_delete_crew", {
+        code
+      });
+      if (r.error) return "Couldn't delete: " + (r.error.message || "unknown error");
+    } catch (e) {
+      return "No connection — try again.";
+    }
+    try {
+      localStorage.removeItem(kCrewOps(code));
+      localStorage.removeItem(kCrewSquad(code));
+      localStorage.removeItem(kCrewGames(code));
+      localStorage.removeItem(kCrewWatch(code));
+    } catch (e) {/* noop */}
+    LS.set(K_ME, {
+      id: meRef.current.id,
+      name: meRef.current.name
+    });
+    setCode(null);
+    setTheirs({});
+    setWatch(null);
+    setMine(LS.get(K_SOLO_OPS, []));
+    setSquadLocal(LS.get(K_SOLO_SQUAD, freshSquad()));
+    setGamesLocal(LS.get(K_SOLO_GAMES, []));
+    return null;
+  }, [code]);
   const allOps = useMemo(() => {
     const out = mine.map(o => Object.assign({}, o, {
       byName: me.name || "You"
@@ -1351,6 +1384,7 @@ function useSideline() {
     sync,
     joinCrew,
     leaveCrew,
+    deleteCrew,
     renameMe,
     crewAvailable: CREW_ON,
     games,
@@ -1750,7 +1784,22 @@ function Sideline() {
   }), tab === "roster" && /*#__PURE__*/React.createElement(RosterTab, {
     squad: squad,
     setSquad: setSquad,
-    statOf: statOf
+    statOf: statOf,
+    onScrub: id => {
+      /* Erase a removed player's name from every saved game. Plays only
+         reference player ids, so rewriting the archived name lines is a
+         complete scrub — stat totals stay intact under "Removed player". */
+      S.games.forEach(g => {
+        if ((g.players || []).some(r => r.id === id)) {
+          S.editGame(g.id, {
+            players: g.players.map(r => r.id === id ? Object.assign({}, r, {
+              name: "Removed player",
+              num: "—"
+            }) : r)
+          });
+        }
+      });
+    }
   }), tab === "lineups" && /*#__PURE__*/React.createElement(LineupsTab, {
     squad: squad,
     setSquad: setSquad
@@ -1945,6 +1994,7 @@ function Sideline() {
     onAuth: S.authAction,
     onSignOut: S.signOut,
     onLeave: S.leaveCrew,
+    onDeleteCrew: S.deleteCrew,
     onRename: S.renameMe,
     onClose: () => setSheet(null)
   }), /*#__PURE__*/React.createElement("nav", {
@@ -3764,6 +3814,7 @@ function CrewSheet({
   onSignOut,
   onJoin,
   onLeave,
+  onDeleteCrew,
   onRename,
   onClose
 }) {
@@ -4034,7 +4085,29 @@ function CrewSheet({
       onLeave();
       onClose();
     }
-  }, "Coach on my own instead"), /*#__PURE__*/React.createElement("div", {
+  }, "Coach on my own instead"), isOwner && /*#__PURE__*/React.createElement("button", {
+    className: "abtn ghost",
+    style: {
+      width: "100%",
+      marginTop: 10,
+      color: "var(--stop)",
+      borderColor: "var(--stop)"
+    },
+    disabled: busy,
+    onClick: async () => {
+      if (!window.confirm("Delete this team from Sideline for good? Every coach loses " + "access, and all of it — player names, plays, saved games, schedule — is erased " + "from the server. There is no undo. If you want a copy first, use Back up on the " + "Season tab before doing this.")) return;
+      const typed = window.prompt("Type the crew code (" + code + ") to confirm the delete:");
+      if ((typed || "").trim().toUpperCase() !== code) {
+        setErr("Delete cancelled — the code didn't match.");
+        return;
+      }
+      setErr("");
+      setBusy(true);
+      const r = await onDeleteCrew();
+      setBusy(false);
+      if (r) setErr(r);else onClose();
+    }
+  }, "Delete this team \u2014 erase everything"), /*#__PURE__*/React.createElement("div", {
     className: "empty-note",
     style: {
       textAlign: "left",
@@ -4147,7 +4220,8 @@ function CrewSheet({
 function RosterTab({
   squad,
   setSquad,
-  statOf
+  statOf,
+  onScrub
 }) {
   const [name, setName] = useState("");
   const [num, setNum] = useState("");
@@ -4364,7 +4438,11 @@ function RosterTab({
   }, "Edit"), /*#__PURE__*/React.createElement("button", {
     className: "mini",
     onClick: () => {
-      if (window.confirm("Remove #" + p.num + " " + p.name + " from the roster? Season stats they already have stay saved, but re-adding them later counts as a new player. To change their number or name, use Edit instead.")) remove(p.id);
+      if (!window.confirm("Remove #" + p.num + " " + p.name + " from the roster? Season stats they already have stay saved, but re-adding them later counts as a new player. To change their number or name, use Edit instead.")) return;
+      remove(p.id);
+      if (onScrub && window.confirm("Also erase " + p.name + "'s name from every saved game? " + "Their plays stay in the record as \"Removed player\" so team totals don't change. " + "Use this when a family asks for their child's name to come out of the app.")) {
+        onScrub(p.id);
+      }
     }
   }, "Remove"))), /*#__PURE__*/React.createElement("div", {
     className: "sechd"
