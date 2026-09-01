@@ -1207,6 +1207,8 @@ const endViaSheet = async (opp) => {
   const nicoTot1 = $$("tbody tr").find((r) => r.textContent.indexOf("Nico") >= 0);
   ok("live snaps flow into season totals",
     !!nicoTot1 && parseInt(nicoTot1.querySelectorAll("td")[5].textContent, 10) === nicoBase + 1);
+  ok("info links on the Season tab", !!byText("a", "About") && !!byText("a", "How-to") &&
+    !!byText("a", "Terms"));
 
   console.log("\nper-game stats for archived games");
   const inSheet = (sel, txt) => Array.from($(".sheet").querySelectorAll(sel))

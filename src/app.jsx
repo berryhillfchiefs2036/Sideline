@@ -3443,6 +3443,14 @@ function SeasonTab({ games, squad, setSquad, teamName, onEdit, onRemove, onImpor
         <b> Restore</b> merges a backup in without overwriting anything, so it also works for combining years.
       </div>
 
+      <div className="eyebrow" style={{ margin: "18px 0 6px", textAlign: "center" }}>
+        <a href="./about.html" target="_blank" rel="noopener" style={{ color: "inherit" }}>About</a>
+        {" · "}
+        <a href="./help.html" target="_blank" rel="noopener" style={{ color: "inherit" }}>How-to</a>
+        {" · "}
+        <a href="./terms.html" target="_blank" rel="noopener" style={{ color: "inherit" }}>Terms &amp; Privacy</a>
+      </div>
+
       {statsGame && (
         <GameStatsSheet rec={statsGame} teamName={teamName} onClose={() => setStatsGame(null)} />
       )}

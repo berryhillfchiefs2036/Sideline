@@ -5693,7 +5693,34 @@ function SeasonTab({
       textAlign: "left",
       marginTop: 10
     }
-  }, /*#__PURE__*/React.createElement("b", null, "Back up"), " downloads every saved game as one file \u2014 do it now and then, or before switching phones.", /*#__PURE__*/React.createElement("b", null, " Restore"), " merges a backup in without overwriting anything, so it also works for combining years."), statsGame && /*#__PURE__*/React.createElement(GameStatsSheet, {
+  }, /*#__PURE__*/React.createElement("b", null, "Back up"), " downloads every saved game as one file \u2014 do it now and then, or before switching phones.", /*#__PURE__*/React.createElement("b", null, " Restore"), " merges a backup in without overwriting anything, so it also works for combining years."), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "18px 0 6px",
+      textAlign: "center"
+    }
+  }, /*#__PURE__*/React.createElement("a", {
+    href: "./about.html",
+    target: "_blank",
+    rel: "noopener",
+    style: {
+      color: "inherit"
+    }
+  }, "About"), " · ", /*#__PURE__*/React.createElement("a", {
+    href: "./help.html",
+    target: "_blank",
+    rel: "noopener",
+    style: {
+      color: "inherit"
+    }
+  }, "How-to"), " · ", /*#__PURE__*/React.createElement("a", {
+    href: "./terms.html",
+    target: "_blank",
+    rel: "noopener",
+    style: {
+      color: "inherit"
+    }
+  }, "Terms & Privacy")), statsGame && /*#__PURE__*/React.createElement(GameStatsSheet, {
     rec: statsGame,
     teamName: teamName,
     onClose: () => setStatsGame(null)
