@@ -75,9 +75,19 @@ const endViaSheet = async (opp) => {
   ok("creating a crew waits for sign-in", !!createCrewBtn && createCrewBtn.disabled === true);
   const joinCrewBtn = byText(".confirm", "Join this game");
   ok("joining a crew waits for sign-in", !!joinCrewBtn && joinCrewBtn.disabled === true);
+  ok("info links in the crew sheet", !!byText(".sheet a", "About") &&
+    !!byText(".sheet a", "How-to") && !!byText(".sheet a", "Terms"));
   click(byText(".close", "Done"));
   await flush();
   ok("crew sheet closes", !$(".sheet"));
+
+  console.log("\ninfo pages");
+  ok("about page exists", fs.existsSync(path.join(root, "about.html")));
+  ok("how-to page exists", fs.existsSync(path.join(root, "help.html")));
+  const termsHtml = fs.existsSync(path.join(root, "terms.html"))
+    ? fs.readFileSync(path.join(root, "terms.html"), "utf8") : "";
+  ok("terms page covers terms and privacy",
+    termsHtml.indexOf("Terms of Service") >= 0 && termsHtml.indexOf("Privacy Policy") >= 0);
 
   console.log("\nroster");
   click(byText(".nav button", "Roster"));

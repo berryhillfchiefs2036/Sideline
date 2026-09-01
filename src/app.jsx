@@ -782,12 +782,22 @@ function useSideline() {
   }, [code, mine, pushOps]);
 
   const leaveCrew = useCallback(() => {
+    /* Best-effort: drop this coach's membership row too, so the crew's
+       coach list stays honest. Local data is untouched either way. */
+    if (code && sb) {
+      sb.auth.getSession().then((s) => {
+        if (s && s.data && s.data.session) {
+          sb.from("sideline_members").delete().eq("game_code", code)
+            .eq("user_id", s.data.session.user.id).then(() => {});
+        }
+      }).catch(() => {});
+    }
     LS.set(K_ME, { id: meRef.current.id, name: meRef.current.name });
     setCode(null); setTheirs({});
     setMine(LS.get(K_SOLO_OPS, []));
     setSquadLocal(LS.get(K_SOLO_SQUAD, freshSquad()));
     setGamesLocal(LS.get(K_SOLO_GAMES, []));
-  }, []);
+  }, [code]);
 
   const allOps = useMemo(() => {
     const out = mine.map((o) => Object.assign({}, o, { byName: me.name || "You" }));
@@ -2284,6 +2294,31 @@ function CrewSheet({ me, code, sync, available, user, watch, onAuth, onSignOut, 
   const [busy, setBusy] = useState(false);
   const ready = entry.replace(/[^A-Za-z0-9]/g, "").length >= 4;
 
+  /* Crew roster of coaches: everyone can see who's on the crew; the owner
+     can remove a coach (they keep their account, lose this team's access).
+     Quietly absent on a database that hasn't been migrated to accounts. */
+  const [crew, setCrew] = useState(null);
+  const [membersList, setMembersList] = useState(null);
+  const loadCrew = useCallback(async () => {
+    if (!sb || !code || !user) return;
+    try {
+      const c = await sb.from("sideline_crews").select("owner,watch_code").eq("game_code", code).maybeSingle();
+      if (!c.error && c.data) setCrew(c.data);
+      const m = await sb.from("sideline_members").select("user_id,coach_name,joined_at").eq("game_code", code);
+      if (!m.error && m.data) setMembersList(m.data);
+    } catch (e) { /* offline or pre-accounts schema — section stays hidden */ }
+  }, [code, user]);
+  useEffect(() => { loadCrew(); }, [loadCrew]);
+  const isOwner = !!(crew && user && crew.owner === user.id);
+  const removeCoach = async (m) => {
+    if (!window.confirm("Remove " + (m.coach_name || "this coach") + " from the crew? They keep their " +
+      "account but lose access to this team unless they rejoin with the code.")) return;
+    try {
+      await sb.from("sideline_members").delete().eq("game_code", code).eq("user_id", m.user_id);
+    } catch (e) { /* surface via reload below */ }
+    loadCrew();
+  };
+
   const doAuth = async (mode) => {
     setErr(""); setBusy(true);
     const r = await onAuth(mode, email.trim(), pass);
@@ -2364,7 +2399,8 @@ function CrewSheet({ me, code, sync, available, user, watch, onAuth, onSignOut, 
                 the play-by-play as it happens. No editing.
               </div>
               <button className="mini dark" style={{ width: "100%", padding: 10 }} onClick={() => {
-                const link = window.location.origin + window.location.pathname + "?watch=" + (watch || code);
+                const link = window.location.origin + window.location.pathname + "?watch=" +
+                  ((crew && crew.watch_code) || watch || code);
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                   navigator.clipboard.writeText(link).then(
                     () => window.alert("Watch link copied:\n" + link),
@@ -2383,6 +2419,33 @@ function CrewSheet({ me, code, sync, available, user, watch, onAuth, onSignOut, 
                 onChange={(e) => setName(e.target.value)} />
               <button className="mini dark" onClick={() => onRename(name)}>Save</button>
             </div>
+            {user && membersList && membersList.length > 0 && (
+              <div className="yardbox" style={{ marginTop: 10, textAlign: "left" }}>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>
+                  Coaches on this crew{isOwner ? " — you're the owner" : ""}</div>
+                {membersList.map((m) => (
+                  <div className="row" key={m.user_id} style={{ marginTop: 6 }}>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 14 }}>
+                      <b>{m.coach_name || "Coach"}</b>
+                      <span className="eyebrow" style={{ marginLeft: 6 }}>
+                        {crew && m.user_id === crew.owner ? "owner" : ""}
+                        {user && m.user_id === user.id
+                          ? (crew && m.user_id === crew.owner ? " · you" : "you") : ""}
+                      </span>
+                    </div>
+                    {isOwner && m.user_id !== user.id && (
+                      <button className="mini" onClick={() => removeCoach(m)}>Remove</button>
+                    )}
+                  </div>
+                ))}
+                {isOwner && (
+                  <div style={{ fontSize: 12, color: "var(--soft)", marginTop: 8, lineHeight: 1.4 }}>
+                    Anyone with the crew code can join, so keep it to your staff — and if someone
+                    who shouldn't be here shows up, remove them right here.
+                  </div>
+                )}
+              </div>
+            )}
             {user ? (
               <div className="row" style={{ marginTop: 10 }}>
                 <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: "var(--soft)" }}>
@@ -2435,6 +2498,14 @@ function CrewSheet({ me, code, sync, available, user, watch, onAuth, onSignOut, 
             </div>
           </React.Fragment>
         )}
+
+        <div className="eyebrow" style={{ marginTop: 16, textAlign: "center" }}>
+          <a href="./about.html" target="_blank" rel="noopener" style={{ color: "inherit" }}>About</a>
+          {" · "}
+          <a href="./help.html" target="_blank" rel="noopener" style={{ color: "inherit" }}>How-to</a>
+          {" · "}
+          <a href="./terms.html" target="_blank" rel="noopener" style={{ color: "inherit" }}>Terms &amp; Privacy</a>
+        </div>
       </div>
     </div>
   );
@@ -3720,6 +3791,14 @@ function GameCast({ code }) {
         )}
         </React.Fragment>
         )}
+
+        <div className="eyebrow" style={{ margin: "16px 0 8px", textAlign: "center" }}>
+          <a href="./about.html" target="_blank" rel="noopener" style={{ color: "inherit" }}>About</a>
+          {" · "}
+          <a href="./help.html" target="_blank" rel="noopener" style={{ color: "inherit" }}>How-to</a>
+          {" · "}
+          <a href="./terms.html" target="_blank" rel="noopener" style={{ color: "inherit" }}>Terms &amp; Privacy</a>
+        </div>
       </div>
     </div>
   );
